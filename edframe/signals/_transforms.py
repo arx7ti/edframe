@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import inspect
 from typing import Union, Any
 from scipy.signal import resample
 from scipy.interpolate import interp1d
-from statsmodels.tsa.ar_model import AutoReg
+# from statsmodels.tsa.ar_model import AutoReg
 
 import numpy as np
 
@@ -99,3 +100,41 @@ def extrapolate(x: np.ndarray, extrawidth: int) -> np.ndarray:
     extra = extra.reshape(extrawidth, x.shape[1])
     x = np.concatenate((x, extra), axis=-2)
     return x
+
+class T:
+
+    def __init__(self, f: Callable, out_args, **in_args) -> None:
+
+        if len(out_args) == 0:
+            raise ValueError
+
+        fparams = inspect.signature(f).parameters.keys()
+        for fprop in in_args.keys():
+            if fprop not in fparams:
+                raise ValueError
+
+        self._f = f
+        self._out_args = out_args
+        self._in_args = in_args
+
+    def __call__(self, x: PowerSample) -> dict[str, Any]:
+
+        data = {}
+
+        for fprop, xprop in self._in_args.items():
+            if hasattr(x, xprop):
+                data.update({fprop: getattr(x, xprop)})
+            else:
+                raise ValueError
+
+        result = self._f(**data)
+        data = {}
+        for xprop, v in zip(self._out_args, result):
+            if hasattr(x, xprop):
+                data.update({xprop: v})
+            else:
+                raise ValueError
+
+        x = x.update(**data)
+
+        return x
