@@ -13,14 +13,6 @@ def crop(x, a, b):
     pass
 
 
-class EventDetector:
-    pass
-
-
-class FeatureExtractor:
-    pass
-
-
 class Generic:
 
     # __verbose__ = "{cls}()"
@@ -593,16 +585,15 @@ class PowerSample(Generic):
             data = getattr(self, variable)
 
         for f in fs:
-            if issubclass(f, PowerSampleTransform):
-                data, variables = f(data, *f.fetch_args(self),
-                                    **f.fetch_kwargs(self))
-            elif isinstance(f, Callable):
-                data = f(data)
-                variables = {}
+            # if isinstance(f, T):
+            #     data, variables = f(self)
+            if isinstance(f, Callable):
+                # data, variables = f(data), {}
+                data= f(data)
             else:
                 raise ValueError
 
-        return self.update(data=data, **variables)
+        return self.update(data=data)
 
 class PowerSet(Generic):
     events = Events
@@ -630,3 +621,34 @@ class PowerSet(Generic):
         for sample in self.data:
             data.append(sample.apply(fs))
         return self.update(data=data)
+
+class VISample(PowerSample):
+
+    data_attr = "i"
+
+    def __init__(self, v, i, fs, labels=None):
+        super().__init__(data=[v, i], fs=fs, labels=labels)
+
+    @property
+    def v(self):
+        return self.data[0]
+
+    @v.setter
+    def v(self, v):
+        self.data[0] = v
+
+    @property
+    def i(self):
+        return self.data[1]
+
+    @i.setter
+    def i(self, i):
+        self.data[1] = i
+
+    @property
+    def s(self):
+        return self.v * self.i
+
+    @property
+    def values(self):
+        return self.i
