@@ -19,72 +19,91 @@ class FITPS:
     Frequency Invariant Transformation of Periodic Signals.
     """
 
-    @property
-    def roots(self) -> np.ndarray:
-        if self._v0 is not None:
-            return self._v0
-        else:
-            raise FITPSNotCalledError
-
-    @property
-    def n_samples(self) -> int:
-        if self._ns is not None:
-            return self._ns
-        else:
-            raise FITPSNotCalledError
-
-    @property
-    def n_periods(self) -> int:
-        if self._np is not None:
-            return self._np
-        else:
-            raise FITPSNotCalledError
-
-    @property
-    def f0(self) -> int:
-        if self._f0 is not None:
-            return self._f0
-        else:
-            raise FITPSNotCalledError
-
-    @property
-    def mains_frequency(self) -> int:
-        return self.f0
-
-    def __init__(self,
-                 f0: Optional[float] = None,
-                 n: int = 4,
-                 cf: float = 0.01,
-                 np_loss: int = 4,
-                 v_quality: float = 0.9) -> None:
+    def __init__(
+        self,
+        n: int = 4,
+        cf: float = 0.01,
+    ) -> None:
         self._n = n
         self._cf = cf
-        self._f0 = f0
-        self._np_loss = np_loss
-        self._v_quality = v_quality
-        self._v0 = None
-        self._f0 = None
-        self._ns = None
-        self._np = None
-        return None
 
-    def __call__(self, v: np.ndarray, i: np.ndarray,
-                 sr: int) -> tuple[np.ndarray, np.ndarray]:
-        assert len(v.shape) == len(i.shape) == 1
-        assert v.shape[0] == i.shape[0]
-        vf = self._filter_v(v)
+    def __call__(
+        self,
+        v,
+        i,
+        locs=None,
+        fs=None,
+        f0=None,
+    ) -> tuple[np.ndarray, ...]:
+
+        vf = v
         v0 = self._compute_roots(vf)
         dv = self._compute_shifts(vf, v0)
         del vf
-        dv0 = np.diff(v0)
-        if self._f0 is not None:
-            ns = round(sr / self._f0)
+
+        if f0 is not None and fs is not None:
+            ns = round(fs / f0)
         else:
+            dv0 = np.diff(v0)
             ns = round(np.mean(dv0))
+
         v = self._allocate(v, v0, dv, ns)
-        self._np = v.shape[0]
         i = self._allocate(i, v0, dv, ns)
-        return v, i
+
+        if locs is not None:
+            locs = self._transform_locs(locs, v0)
+            return v, i, locs
+            # return power_sample.update(v=v, i=i, locs=locs)
+        else:
+            # return power_sample.update(v=v, i=i)
+            return v, i
+
+    @staticmethod
+    def _transform_locs(locs, v0):
+        shape = locs.shape
+
+        if len(shape) == 2:
+            locs = locs.ravel()
+        elif len(shape) != 1:
+            raise ValueError
+
+        ord = np.argsort(locs)
+
+        j = 0
+        plocs_sorted = []
+        n_periods = len(v0) - 2
+        for loc in locs[ord]:
+            if loc < v0[0]:
+                plocs_sorted.append(np.NINF)
+            elif loc > v0[-2]:
+                plocs_sorted.append(np.Inf)
+            else:
+                for k in range(j, n_periods):
+                    if (loc >= v0[k]) & (loc < v0[k + 1]):
+                        plocs_sorted.append(k)
+                        j = k
+                        break
+
+        assert len(plocs_sorted) == len(locs)
+
+        plocs = np.empty(len(ord), dtype=float)
+        for i, j in enumerate(ord):
+            plocs[j] = plocs_sorted[i]
+
+        # Calibration
+        if len(shape) == 2:
+            plocs = plocs.reshape(*shape)
+            q1 = (plocs[:, 0] == np.NINF) & (plocs[:, 1] == np.NINF)
+            q2 = (plocs[:, 0] == np.Inf) & (plocs[:, 1] == np.Inf)
+            q3 = (plocs[:, 0] == np.NINF) & (plocs[:, 1] != np.NINF)
+            q4 = (plocs[:, 0] != np.Inf) & (plocs[:, 1] == np.Inf)
+            plocs[q1 | q2] = -1
+            plocs[q3, 0] = 0
+            plocs[q4, 1] = n_periods - 1
+
+        plocs = plocs.astype(int)
+
+        return plocs
 
     def _filter_v(self, v: np.ndarray) -> np.ndarray:
         f1, f2 = butter(self._n, self._cf)
@@ -113,17 +132,22 @@ class FITPS:
 
     @staticmethod
     @njit
-    def _allocate(vec: np.ndarray, v0: np.ndarray, dv: np.ndarray,
-                  ns: int) -> np.ndarray:
+    def _allocate(
+        vec: np.ndarray,
+        v0: np.ndarray,
+        dv: np.ndarray,
+        ns_int: int,
+    ) -> np.ndarray:
+        ns_float = np.float32(ns_int)
         n_periods = len(dv) - 1
-        mat = np.zeros((n_periods, ns), dtype=np.float32)
+        mat = np.zeros((n_periods, ns_int), dtype=np.float32)
         v0 = v0.astype(np.float32)
         for j in np.arange(n_periods, dtype=np.int32):
             length = (v0[j + 1] + dv[j + 1]) - (v0[j] + dv[j])
-            dist = length / np.float32(ns)
-            for k0 in np.arange(1, ns + 1, dtype=np.int32):
-                k1 = v0[j] + dv[j] + dist * np.float32(k0 - 1)
+            dist = length / ns_float
+            for k in np.arange(ns_int, dtype=np.int32):
+                k1 = v0[j] + dv[j] + dist * np.float32(k)
                 k2 = np.int32(np.floor(k1))
                 k3 = np.int32(np.ceil(k1))
-                mat[j, k0] = vec[k2] + (vec[k3] - vec[k2]) * dv[j]
+                mat[j, k] = vec[k2] + (vec[k3] - vec[k2]) * dv[j]
         return mat
