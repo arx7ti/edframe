@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import torch
 import inspect
 import numpy as np
 import pandas as pd
@@ -9,8 +10,12 @@ from beartype.typing import Iterable
 from typing import Optional, Callable, Union, Any, Iterable
 
 
-def crop(x, a, b):
-    pass
+def lock(power_sample: PowerSample) -> PowerSample:
+    return power_sample.__lock__()
+
+
+def unlock(power_sample: PowerSample) -> PowerSample:
+    return power_sample.__unlock__()
 
 
 class Generic:
@@ -95,9 +100,9 @@ class Backref(Generic):
         self._backref = backref
 
         if data is None:
-            self._data = self.__default_data__
+            self.data = self.__default_data__
         else:
-            self._data = data
+            self.data = data
 
         self.__after__()
 
@@ -109,13 +114,13 @@ class Backref(Generic):
     def backref(self, backref):
         self._backref = backref
 
-    @property
-    def data(self):
-        return self._data
+    # @property
+    # def data(self):
+    #     return self.data
 
-    @data.setter
-    def data(self, data):
-        self._data = data
+    # @data.setter
+    # def data(self, data):
+    #     self.data = data
 
     @property
     def related_name(self) -> str:
@@ -262,19 +267,19 @@ class BackrefDataFrame(Backref):
 
     # return self.update(data=df)
 
-    def to_dataframe(self):
-        return self.data
+    # def to_dataframe(self):
+    #     return self.data
 
 
 class Events(BackrefDataFrame):
 
     @property
     def data(self) -> pd.DataFrame:
-        return self._data
+        return self.data
 
     @data.setter
     def data(self, data):
-        self._data = data
+        self.data = data
 
     def to_features(self) -> Features:
         pass
@@ -284,12 +289,12 @@ class Features(BackrefDataFrame):
 
     @property
     def data(self) -> pd.DataFrame:
-        return self._data
+        return self.data
 
     @data.setter
     def data(self, values: pd.DataFrame):
         if isinstance(values, pd.DataFrame):
-            self._data = values
+            self.data = values
         else:
             raise ValueError
 
@@ -348,7 +353,7 @@ class Components(Backref):
 
     @property
     def data(self) -> np.ndarray:
-        return self._data
+        return self.data
 
     @data.setter
     def data(
@@ -364,7 +369,7 @@ class Components(Backref):
             raise ValueError
         # TODO all relations to the labels in backref.labels
 
-        self._data = values
+        self.data = values
 
     @property
     def values(self):
@@ -433,8 +438,8 @@ class Components(Backref):
             values.append(f(v, *args, **kwargs))
         return values
 
-    def crop(self, a, b):
-        return self.transform(crop, a, b)
+    # def crop(self, a, b):
+    #     return self.transform(crop, a, b)
 
     def sum(self, rule: str = "+"):
         if rule == "+":
@@ -450,21 +455,50 @@ class PowerSample(Generic):
     events = Events
     features = Features
     components = Components
-    data_attr = "values"
+
+    class Meta:
+        values_attr = None
+
+    class State:
+
+        def __init__(self) -> None:
+            pass
+
+        def check_lengths(self, labels, appliances, locs, components):
+            lengths = {}
+
+            if labels is not None:
+                lengths.update(labels=len(labels))
+
+            if appliances is not None:
+                lengths.update(appliances=len(appliances))
+
+            if locs is not None:
+                lengths.update(locs=len(locs))
+
+            if components is not None:
+                lengths.update(components=len(components))
+
+            if len(lengths) > 1:
+                if not np.all(lengths[1:] == lengths[0]):
+                    raise ValueError(
+                        "Arguments %s must have the same length" %
+                        ", ".join(map(lambda x: "\"%s\"" % x, lengths.keys())))
 
     def __init__(
         self,
-        data: Optional[Union[np.ndarray, dict[str, np.ndarray]]] = None,
+        data,
         fs: Optional[int] = None,
         fs_type: str = "high",
         f0: float = None,
-        labels: Optional[Union[list[str], dict[str, float]]] = None,
+        labels: Optional[Union[list[str], dict[str, float],
+                               list[int, float]]] = None,
         appliances: Optional[list[str]] = None,
         locs: Optional[np.ndarray] = None,
-        components: Optional[np.ndarray] = None,
-        metadata: Optional[list[dict[str, Union[str, int, float]]]] = None,
+        components: Optional[list[PowerSample]] = None,
         aggregation: Optional[str] = '+',
-        **kwargs: Any,
+        # **kwargs: Any,
+        sort: bool = False,
     ) -> None:
         """
             y: can be either appliance(-s), or state(-s) of appliance(-s), or share(-s) of appliance(-s)
@@ -472,49 +506,49 @@ class PowerSample(Generic):
             locs: stand for events locations
         """
 
-        # if kwargs.get("sort", True):
-        #     # TODO metadata
-        #     order = np.argsort(appliances)
-        #     y = y[order]
-        #     appliances = appliances[order]
-        #     locs = locs[order]
-        #     components = components[order]
+        if sort and appliances is not None:
+            order = np.argsort(appliances)
+            appliances = appliances[order]
+            if labels is not None:
+                labels = labels[order]
+            if locs is not None:
+                locs = locs[order]
+            if components is not None:
+                components = components[order]
 
-        # self.check_lengths(x, y, appliances, locs, components, metadata)
+        self.State.check_lengths(labels, appliances, locs, components)
         # self.check_laziness(x, components)
         # self.check_components(components)
         # self.check_locs(locs)
         # self.check_y(y)
 
-        self._data = data
+        self.data = data
         self._fs = fs
         self._fs_type = fs_type
         self._f0 = f0
         self._labels = labels
         self._appliances = appliances
         self._locs = locs
-        if abby.is_bearable(components, (list[np.ndarray],\
-                                      set[np.ndarray], tuple[np.ndarray, ...])):
-            components = np.stack(components, axis=0)
-        # self._components = components
-        self._metadata = metadata
         self._aggregation = aggregation
-        # self._events = pd.DataFrame()
-        # self._features = pd.DataFrame()
 
+        self._locked = False
         self.__backref__(components=components)
 
     def is_lazy(self):
-        return self._data is None
+        return self.data is None
 
-    @property
-    def data(self):
-        # TODO think which are most important and will be used!
-        return self._data
+    def is_locked(self):
+        return self._locked
 
-    @property
-    def values(self):
-        return self.data
+    def __lock__(self):
+        return self.update(_locked=True)
+
+    def __unlock__(self):
+        return self.update(_locked=False)
+
+    # TODO allow any action if unlocked
+    # TODO lock if state is not correct
+    # TODO define state "live" checker
 
     @property
     def f0(self):
@@ -533,16 +567,8 @@ class PowerSample(Generic):
         return self._labels
 
     @labels.setter
-    def labels(self, labels) -> PowerSample:
-        if self.components is not None:
-            if len(labels) != self.components.count():
-                raise ValueError
-        if self.appliances is not None:
-            if len(labels) != len(self.appliances):
-                raise ValueError
-        return self.update(_labels=labels)
-        # if abby.is_bearable(labels, (list[str],tuple[str,...], set[str]))\
-        #     and self.components is not None:
+    def labels(self, labels) -> None:
+        self._labels = labels
 
     # def labels(self):
     #   if abby.is_bearable(self.labels, list[str]):
@@ -589,45 +615,45 @@ class PowerSample(Generic):
             #     data, variables = f(self)
             if isinstance(f, Callable):
                 # data, variables = f(data), {}
-                data= f(data)
+                data = f(data)
             else:
                 raise ValueError
 
         return self.update(data=data)
 
-class PowerSet(Generic):
-    events = Events
-    features = Features
-
-    def __init__(self, data) -> None:
-        self._data = data
-        self.__backref__()
-
-    def __len__(self):
-      return len(self.data)
-
-    def count(self):
-      return len(self)
-
-    def labels(self):
-        pass
-
     @property
-    def data(self):
-        return self._data
+    def values(self):
+        return getattr(self, self.Meta.values_attr)
 
-    def map(self, fs):
-        data = []
-        for sample in self.data:
-            data.append(sample.apply(fs))
-        return self.update(data=data)
 
 class VISample(PowerSample):
 
-    data_attr = "i"
+    class Meta:
+        values_attr = "i"
 
-    def __init__(self, v, i, fs, labels=None):
-        super().__init__(data=[v, i], fs=fs, labels=labels)
+    def __init__(
+        self,
+        v,
+        i,
+        fs,
+        f0: float = None,
+        labels: Optional[Union[list[str], dict[str, float]]] = None,
+        appliances: Optional[list[str]] = None,
+        locs: Optional[np.ndarray] = None,
+        components: Optional[np.ndarray] = None,
+        aggregation: Optional[str] = '+',
+        **kwargs: Any,
+    ):
+        super().__init__(data=[v, i],
+                         fs=fs,
+                         fs_type="high",
+                         f0=f0,
+                         labels=labels,
+                         appliances=appliances,
+                         locs=locs,
+                         components=components,
+                         aggregation=aggregation,
+                         **kwargs)
 
     @property
     def v(self):
@@ -635,6 +661,8 @@ class VISample(PowerSample):
 
     @v.setter
     def v(self, v):
+        if v.shape != self.v.shape:
+            raise ValueError
         self.data[0] = v
 
     @property
@@ -643,12 +671,34 @@ class VISample(PowerSample):
 
     @i.setter
     def i(self, i):
+        if i.shape != self.i.shape:
+            raise ValueError
         self.data[1] = i
 
     @property
     def s(self):
         return self.v * self.i
 
-    @property
-    def values(self):
-        return self.i
+
+class PowerSet(Generic):
+    events = Events
+    features = Features
+
+    def __init__(self, data) -> None:
+        self.data = data
+        self.__backref__()
+
+    def __len__(self):
+        return len(self.data)
+
+    def count(self):
+        return len(self)
+
+    def labels(self):
+        pass
+
+    def map(self, fs):
+        data = []
+        for sample in self.data:
+            data.append(sample.apply(fs))
+        return self.update(data=data)
