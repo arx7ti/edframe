@@ -107,7 +107,7 @@ class FITPS:
 
     def _filter_v(self, v: np.ndarray) -> np.ndarray:
         f1, f2 = butter(self._n, self._cf)
-        v = filtfilt(f1, f2, v).astype(np.float32)
+        v = filtfilt(f1, f2, v).astype(v.dtype)
         return v
 
     @staticmethod
@@ -115,7 +115,7 @@ class FITPS:
     def _compute_roots(v: np.ndarray) -> np.ndarray:
         v0 = np.empty(0, dtype=np.int32)
         for j in np.arange(len(v) - 1, dtype=np.int32):
-            if (v[j] < np.float32(0.0)) & (v[j + 1] > np.float32(0.0)):
+            if (v[j] < v.dtype.type(0.0)) & (v[j + 1] > v.dtype.type(0.0)):
                 v0 = np.append(v0, j)
             else:
                 continue
@@ -124,7 +124,7 @@ class FITPS:
     @staticmethod
     @njit
     def _compute_shifts(v: np.ndarray, v0: np.ndarray) -> np.ndarray:
-        dv = np.empty(0, dtype=np.float32)
+        dv = np.empty(0, dtype=v.dtype)
         for j in np.arange(len(v0) - 1, dtype=np.int32):
             k = v0[j]
             dv = np.append(dv, -v[k] / (v[k + 1] - v[k]))
@@ -138,15 +138,15 @@ class FITPS:
         dv: np.ndarray,
         ns_int: int,
     ) -> np.ndarray:
-        ns_float = np.float32(ns_int)
+        ns_float = vec.dtype.type(ns_int)
         n_periods = len(dv) - 1
-        mat = np.zeros((n_periods, ns_int), dtype=np.float32)
-        v0 = v0.astype(np.float32)
+        mat = np.zeros((n_periods, ns_int), dtype=vec.dtype)
+        v0 = v0.astype(vec.dtype)
         for j in np.arange(n_periods, dtype=np.int32):
             length = (v0[j + 1] + dv[j + 1]) - (v0[j] + dv[j])
             dist = length / ns_float
             for k in np.arange(ns_int, dtype=np.int32):
-                k1 = v0[j] + dv[j] + dist * np.float32(k)
+                k1 = v0[j] + dv[j] + dist * vec.dtype.type(k)
                 k2 = np.int32(np.floor(k1))
                 k3 = np.int32(np.ceil(k1))
                 mat[j, k] = vec[k2] + (vec[k3] - vec[k2]) * dv[j]
