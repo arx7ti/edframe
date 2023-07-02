@@ -213,7 +213,6 @@ class BackrefDataFrame(Backref):
         if issubclass(self.backref.__class__, PowerSet):
 
             df = pd.DataFrame()
-            # features = self.new()
 
             for sample in self.backref.data:
                 features = sample.features.get(fs, variable=variable)
@@ -451,6 +450,33 @@ class LockedError(Exception):
     pass
 
 
+class GenericState:
+
+    def __init__(self) -> None:
+        self._locked = False
+        self._msg = ""
+
+    def is_locked(self):
+        return self._locked
+
+    def raise_error(self):
+        raise LockedError(self._msg)
+
+    def lock(self, msg=None):
+        msg = "" if msg is None else msg
+        self._locked = True
+        self._msg = msg
+        self.raise_error()
+
+    def unlock(self):
+        self._locked = False
+        self._msg = ""
+
+    def verify(self):
+        if self.is_locked():
+            self.raise_error()
+
+
 class PowerSample(Generic):
     # TODO about named vars, v,i, p etc. to be used further e.g. from Features
 
@@ -461,31 +487,7 @@ class PowerSample(Generic):
     class Meta:
         values_attr = None
 
-    class State:
-
-        def __init__(self) -> None:
-            self._locked = False
-            self._msg = ""
-
-        def is_locked(self):
-            return self._locked
-
-        def raise_error(self):
-            raise LockedError(self._msg)
-
-        def lock(self, msg=None):
-            msg = "" if msg is None else msg
-            self._locked = True
-            self._msg = msg
-            self.raise_error()
-
-        def unlock(self):
-            self._locked = False
-            self._msg = ""
-
-        def verify(self):
-            if self.is_locked():
-                self.raise_error()
+    class State(GenericState):
 
         @classmethod
         def check(cls, method: Callable):
