@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import inspect
-from typing import Union, Any
 from scipy.signal import resample
 from scipy.interpolate import interp1d
-# from statsmodels.tsa.ar_model import AutoReg
+from typing import Union, Any, Callable
+from statsmodels.tsa.ar_model import AutoReg
 
 import numpy as np
 
@@ -101,40 +101,50 @@ def extrapolate(x: np.ndarray, extrawidth: int) -> np.ndarray:
     x = np.concatenate((x, extra), axis=-2)
     return x
 
-class T:
 
-    def __init__(self, f: Callable, out_args, **in_args) -> None:
+class F:
 
-        if len(out_args) == 0:
+    def __init__(self, fn: Callable, map_out_args, **map_in_args) -> None:
+
+        if len(map_out_args) == 0:
             raise ValueError
 
-        fparams = inspect.signature(f).parameters.keys()
-        for fprop in in_args.keys():
-            if fprop not in fparams:
+        params = inspect.signature(fn).parameters.keys()
+
+        for param in map_in_args.keys():
+            if param not in params:
                 raise ValueError
 
-        self._f = f
-        self._out_args = out_args
-        self._in_args = in_args
+        self._fn = fn
+        self._map_out_args = map_out_args
+        self._map_in_args = map_in_args
 
-    def __call__(self, x: PowerSample) -> dict[str, Any]:
+    def __call__(self, ps: PowerSample) -> PowerSample:
 
         data = {}
 
-        for fprop, xprop in self._in_args.items():
-            if hasattr(x, xprop):
-                data.update({fprop: getattr(x, xprop)})
+        for fparam, attr in self._map_in_args.items():
+            if hasattr(ps, attr):
+                data.update({fparam: getattr(ps, attr)})
             else:
-                raise ValueError
+                raise ValueError("Parameter \"%s\" was not found" % attr)
 
-        result = self._f(**data)
+        result = self._fn(**data)
+
+        if not isinstance(result, tuple):
+            result = (result, )
+
+        if len(result) < len(self._map_out_args):
+            raise ValueError
+
         data = {}
-        for xprop, v in zip(self._out_args, result):
-            if hasattr(x, xprop):
-                data.update({xprop: v})
+
+        for attr, v in zip(self._map_out_args, result):
+            if hasattr(ps, attr):
+                data.update({attr: v})
             else:
                 raise ValueError
 
-        x = x.update(**data)
+        ps = ps.update(**data)
 
-        return x
+        return ps

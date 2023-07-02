@@ -4,16 +4,13 @@ import torch
 import inspect
 import numpy as np
 import pandas as pd
+
 from beartype import abby
 from copy import deepcopy
 from beartype.typing import Iterable
 from typing import Optional, Callable, Union, Any, Iterable
 
-# def lock(power_sample: PowerSample) -> PowerSample:
-#     return power_sample.__lock__()
-
-# def unlock(power_sample: PowerSample) -> PowerSample:
-#     return power_sample.__unlock__()
+from edframe.signals import F
 
 
 class Generic:
@@ -62,6 +59,9 @@ class Generic:
                 setattr(inst, p, v)
 
         return inst
+
+    def copy(self):
+        return self.update()
 
     def withbackrefs(self):
 
@@ -615,16 +615,6 @@ class PowerSample(Generic):
     def is_lazy(self):
         return self.data is None
 
-    # def __lock__(self):
-    #     return self.update(_locked=True)
-
-    # def __unlock__(self):
-    #     return self.update(_locked=False)
-
-    # TODO allow any action if unlocked
-    # TODO lock if state is not correct
-    # TODO define state "live" checker
-
     @property
     def data(self):
         return self._data
@@ -636,6 +626,14 @@ class PowerSample(Generic):
     @property
     def f0(self):
         return self._f0
+
+    @property
+    def fs(self):
+        return self._fs
+
+    @fs.setter
+    def fs(self, fs):
+        self._fs = fs
 
     @property
     def locs(self):
@@ -673,42 +671,47 @@ class PowerSample(Generic):
 
     @State.check
     def __getitem__(self, locs):
-        # ps = self.clear()
         data = self.data[locs]
         # TODO
         # ps._data = ps._data[locs]
         if self.components.count() > 0:
             components = self.components[:, locs]
-        if self._locs is not None:
-            locs = np.clips(self._locs, a_min=locs[:, 0], a_max=locs[:, 1])
+        if self.locs is not None:
+            locs = np.clips(self.locs, a_min=locs[:, 0], a_max=locs[:, 1])
             # TODO locs?
         return self.update(data=data, _locs=locs, _components=components)
 
     @State.check
-    def apply(self, fns, variable=None):
-
+    def apply(
+        self,
+        fns: Union[Callable, Iterable[Callable, F]],
+    ) -> PowerSample:
         if not isinstance(fns, Iterable):
             fns = [fns]
 
-        if variable is None:
-            data = self.values
-        else:
-            data = getattr(self, variable)
+        if len(fns) == 0:
+            raise ValueError
+
+        ps = self.copy()
 
         for fn in fns:
-            # if isinstance(f, T):
-            #     data, variables = f(self)
-            if isinstance(fn, Callable):
-                # data, variables = f(data), {}
-                data = fn(data)
-            else:
-                raise ValueError
+            if not isinstance(fn, F):
+                arg = tuple(inspect.signature(fn).parameters)[0]
+                # TODO values to data
+                fn = F(fn, ("values", ), **{arg: "values"})
 
-        return self.update(data=data)
+            ps = fn(ps)
+
+        return ps
 
     @property
     def values(self):
         return getattr(self, self.Meta.values_attr)
+
+    @values.setter
+    def values(self, values):
+        # TODO check setters in inherited classes
+        return setattr(self, self.Meta.values_attr, values)
 
 
 class VISample(PowerSample):
@@ -746,8 +749,8 @@ class VISample(PowerSample):
 
     @v.setter
     def v(self, v):
-        if v.shape != self.v.shape:
-            raise ValueError
+        # if v.shape != self.v.shape:
+        #     raise ValueError
         self.data[0] = v
 
     @property
@@ -756,8 +759,8 @@ class VISample(PowerSample):
 
     @i.setter
     def i(self, i):
-        if i.shape != self.i.shape:
-            raise ValueError
+        # if i.shape != self.i.shape:
+        #     raise ValueError
         self.data[1] = i
 
     @property
