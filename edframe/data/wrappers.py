@@ -9,13 +9,11 @@ from copy import deepcopy
 from beartype.typing import Iterable
 from typing import Optional, Callable, Union, Any, Iterable
 
+# def lock(power_sample: PowerSample) -> PowerSample:
+#     return power_sample.__lock__()
 
-def lock(power_sample: PowerSample) -> PowerSample:
-    return power_sample.__lock__()
-
-
-def unlock(power_sample: PowerSample) -> PowerSample:
-    return power_sample.__unlock__()
+# def unlock(power_sample: PowerSample) -> PowerSample:
+#     return power_sample.__unlock__()
 
 
 class Generic:
@@ -100,9 +98,9 @@ class Backref(Generic):
         self._backref = backref
 
         if data is None:
-            self.data = self.__default_data__
+            self._data = self.__default_data__
         else:
-            self.data = data
+            self._data = data
 
         self.__after__()
 
@@ -114,13 +112,13 @@ class Backref(Generic):
     def backref(self, backref):
         self._backref = backref
 
-    # @property
-    # def data(self):
-    #     return self.data
+    @property
+    def data(self):
+        return self._data
 
-    # @data.setter
-    # def data(self, data):
-    #     self.data = data
+    @data.setter
+    def data(self, data):
+        self._data = data
 
     @property
     def related_name(self) -> str:
@@ -275,11 +273,11 @@ class Events(BackrefDataFrame):
 
     @property
     def data(self) -> pd.DataFrame:
-        return self.data
+        return self._data
 
     @data.setter
     def data(self, data):
-        self.data = data
+        self._data = data
 
     def to_features(self) -> Features:
         pass
@@ -289,12 +287,12 @@ class Features(BackrefDataFrame):
 
     @property
     def data(self) -> pd.DataFrame:
-        return self.data
+        return self._data
 
     @data.setter
     def data(self, values: pd.DataFrame):
         if isinstance(values, pd.DataFrame):
-            self.data = values
+            self._data = values
         else:
             raise ValueError
 
@@ -321,7 +319,7 @@ class Components(Backref):
     All methods except pop and setitem produce new copies with inherited legacy from the previous object
     """
 
-    __default_data__ = np.empty((0, ))
+    __default_data__ = []
     __verbose__ = "{cls}(N={nc})"
 
     # def _check_values(values):
@@ -349,11 +347,11 @@ class Components(Backref):
         return self.update(data=self.data[indexer])
 
     def __len__(self):
-        return self.data.shape[0]
+        return len(self.data)
 
     @property
     def data(self) -> np.ndarray:
-        return self.data
+        return self._data
 
     @data.setter
     def data(
@@ -369,7 +367,7 @@ class Components(Backref):
             raise ValueError
         # TODO all relations to the labels in backref.labels
 
-        self.data = values
+        self._data = values
 
     @property
     def values(self):
@@ -449,6 +447,10 @@ class Components(Backref):
         return self.backref.update(values=values, clear_components=True)
 
 
+class LockedError(Exception):
+    pass
+
+
 class PowerSample(Generic):
     # TODO about named vars, v,i, p etc. to be used further e.g. from Features
 
@@ -462,9 +464,81 @@ class PowerSample(Generic):
     class State:
 
         def __init__(self) -> None:
-            pass
+            self._locked = False
+            self._msg = ""
 
-        def check_lengths(self, labels, appliances, locs, components):
+        def is_locked(self):
+            return self._locked
+
+        def raise_error(self):
+            raise LockedError(self._msg)
+
+        def lock(self, msg=None):
+            msg = "" if msg is None else msg
+            self._locked = True
+            self._msg = msg
+            self.raise_error()
+
+        def unlock(self):
+            self._locked = False
+            self._msg = ""
+
+        def verify(self):
+            if self.is_locked():
+                self.raise_error()
+
+        @classmethod
+        def check(cls, method: Callable):
+
+            def wrapper(self, *args, **kwargs):
+                if not issubclass(self.__class__, PowerSample):
+                    raise ValueError("Argument \"self\" is required")
+
+                self.state.verify()
+
+                labels = self.labels
+                appliances = self.appliances
+                locs = self.locs
+                components = self.components
+
+                msg = cls._get_msg_lengths(labels=labels,
+                                           appliances=appliances,
+                                           locs=locs,
+                                           components=components)
+                if msg is not None:
+                    self.state.lock("Parameter(-s) %s" % msg)
+
+                return method(self, *args, **kwargs)
+
+            return wrapper
+
+        @classmethod
+        def check_init_args(cls, method):
+
+            def wrapper(*args, **kwargs):
+                labels = kwargs.get("labels", None)
+                appliances = kwargs.get("appliances", None)
+                locs = kwargs.get("locs", None)
+                components = kwargs.get("components", None)
+
+                msg = cls._get_msg_lengths(labels=labels,
+                                           appliances=appliances,
+                                           locs=locs,
+                                           components=components)
+                if msg is not None:
+                    raise ValueError("Argument(-s) %s" % msg)
+
+                return method(*args, **kwargs)
+
+            return wrapper
+
+        @staticmethod
+        def _get_msg_lengths(
+            labels=None,
+            appliances=None,
+            locs=None,
+            components=None,
+        ) -> Union[str, None]:
             lengths = {}
 
             if labels is not None:
@@ -477,14 +551,19 @@ class PowerSample(Generic):
                 lengths.update(locs=len(locs))
 
             if components is not None:
-                lengths.update(components=len(components))
+                if len(components) > 0:
+                    lengths.update(components=len(components))
 
             if len(lengths) > 1:
-                if not np.all(lengths[1:] == lengths[0]):
-                    raise ValueError(
-                        "Arguments %s must have the same length" %
-                        ", ".join(map(lambda x: "\"%s\"" % x, lengths.keys())))
+                vs = list(lengths.values())
 
+                if not np.all(vs[1:] == vs[0]):
+                    msg = "%s must have the same length" % (", ".join(
+                        map(lambda x: "\"%s\"" % x, lengths.keys())))
+
+                    return msg
+
+    @State.check_init_args
     def __init__(
         self,
         data,
@@ -497,7 +576,6 @@ class PowerSample(Generic):
         locs: Optional[np.ndarray] = None,
         components: Optional[list[PowerSample]] = None,
         aggregation: Optional[str] = '+',
-        # **kwargs: Any,
         sort: bool = False,
     ) -> None:
         """
@@ -516,13 +594,12 @@ class PowerSample(Generic):
             if components is not None:
                 components = components[order]
 
-        self.State.check_lengths(labels, appliances, locs, components)
         # self.check_laziness(x, components)
         # self.check_components(components)
         # self.check_locs(locs)
         # self.check_y(y)
 
-        self.data = data
+        self._data = data
         self._fs = fs
         self._fs_type = fs_type
         self._f0 = f0
@@ -531,24 +608,30 @@ class PowerSample(Generic):
         self._locs = locs
         self._aggregation = aggregation
 
-        self._locked = False
         self.__backref__(components=components)
+
+        self.state = self.State()
 
     def is_lazy(self):
         return self.data is None
 
-    def is_locked(self):
-        return self._locked
+    # def __lock__(self):
+    #     return self.update(_locked=True)
 
-    def __lock__(self):
-        return self.update(_locked=True)
-
-    def __unlock__(self):
-        return self.update(_locked=False)
+    # def __unlock__(self):
+    #     return self.update(_locked=False)
 
     # TODO allow any action if unlocked
     # TODO lock if state is not correct
     # TODO define state "live" checker
+
+    @property
+    def data(self):
+        return self._data
+
+    @data.setter
+    def data(self, data):
+        self._data = data
 
     @property
     def f0(self):
@@ -588,6 +671,7 @@ class PowerSample(Generic):
     def appliances(self):
         return self._appliances
 
+    @State.check
     def __getitem__(self, locs):
         # ps = self.clear()
         data = self.data[locs]
@@ -600,22 +684,23 @@ class PowerSample(Generic):
             # TODO locs?
         return self.update(data=data, _locs=locs, _components=components)
 
-    def apply(self, fs, variable=None):
+    @State.check
+    def apply(self, fns, variable=None):
 
-        if not isinstance(fs, Iterable):
-            fs = [fs]
+        if not isinstance(fns, Iterable):
+            fns = [fns]
 
         if variable is None:
             data = self.values
         else:
             data = getattr(self, variable)
 
-        for f in fs:
+        for fn in fns:
             # if isinstance(f, T):
             #     data, variables = f(self)
-            if isinstance(f, Callable):
+            if isinstance(fn, Callable):
                 # data, variables = f(data), {}
-                data = f(data)
+                data = fn(data)
             else:
                 raise ValueError
 
@@ -685,7 +770,7 @@ class PowerSet(Generic):
     features = Features
 
     def __init__(self, data) -> None:
-        self.data = data
+        self._data = data
         self.__backref__()
 
     def __len__(self):
