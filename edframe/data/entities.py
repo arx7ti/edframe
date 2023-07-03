@@ -778,6 +778,18 @@ class PowerSet(Generic):
         self._data = data
         self.__backref__()
 
+    def __getitem__(self, indexer):
+        # TODO everywhere: if len == 1 then just item
+        if abby.is_bearable(indexer, Iterable[int]):
+            data = [self.data[i] for i in indexer]
+        else:
+            data = self.data[indexer]
+
+        if isinstance(data, Iterable):
+            return self.update(data=data)
+        else:
+            return data
+
     def __len__(self):
         return len(self.data)
 
@@ -800,6 +812,13 @@ class PowerSet(Generic):
 
     def apply(self, fs):
         data = []
+
         for sample in self.data:
             data.append(sample.apply(fs))
+
         return self.update(data=data)
+
+    # TODO
+    # def map(self, fs):
+    #     data = []
+    #     return data
