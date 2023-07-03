@@ -781,13 +781,24 @@ class PowerSet(Generic):
     def __len__(self):
         return len(self.data)
 
+    @property
+    def data(self):
+        return self._data
+
+    @data.setter
+    def data(self, data):
+        if isinstance(data, list):
+            self._data = data
+        else:
+            raise ValueError
+
     def count(self):
         return len(self)
 
     def labels(self):
         pass
 
-    def map(self, fs):
+    def apply(self, fs):
         data = []
         for sample in self.data:
             data.append(sample.apply(fs))
