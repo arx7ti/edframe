@@ -1,14 +1,32 @@
 from __future__ import annotations
 from sklearn.cluster import AgglomerativeClustering
+from typing import Optional, Union, Any, Callable
 from ..signals import rms
 
 import numpy as np
 
 
+# TODO striding window
 class EventDetector:
     @property
     def defaults(self):
         return {'objective_fn': rms}
+
+    @property
+    def event_name(self):
+        if self._event_name is None:
+            return "Unnamed Event of %s" % self.__class__.__name__
+        else:
+            return self._event_name
+
+    def __init__(self, event_name: Optional[str] = None) -> None:
+        self._event_name = event_name
+
+    def __call__(self, x: np.ndarray) -> list[tuple[str, int, Any]]:
+        return self.detect(x)
+
+    def detect(self, x):
+        raise NotImplementedError
 
     @staticmethod
     def _get_paired_locs(locs, successive: bool = False):
@@ -38,17 +56,28 @@ class ThresholdEvent(EventDetector):
         self,
         alpha: float = 0.05,
         objective_fn: str = None,
-        precomputed: bool = False,
+        above: bool = True,
+        event_name: Optional[str] = None,
     ) -> None:
-        super().__init__()
+        super().__init__(event_name=event_name)
         self._alpha = alpha
+
         if objective_fn is None:
             self._objective_fn = self.defaults['objective_fn']
         else:
             self._objective_fn = objective_fn
-        self._precomputed = precomputed
 
-    def detect(self, x, locs_type: str = '2d'):
+        self._above = above
+
+    @property
+    def event_name(self):
+        if self._event_name is None:
+            return "%s threshold of %s" % ("Above" if self._above else "Below",
+                                           self._objective_fn.__name__)
+        else:
+            return self._event_name
+
+    def detect(self, x):
         if len(x.shape) != 2:
             raise NotImplementedError
 
@@ -56,17 +85,26 @@ class ThresholdEvent(EventDetector):
         f = (y > self._alpha).astype(int)
         df = np.diff(f, prepend=False)
         signs = np.sign(df)
-        locs = np.argwhere(signs != 0).ravel()
-        locs[signs[locs] < 0] -= 1
+        locs0 = np.argwhere(signs > 0).ravel()
+        locs1 = np.argwhere(signs < 0).ravel()
+        locs1 -= 1
+        locs = np.sort(np.concatenate((locs0, locs1)))
+        # locs1[signs[locs] < 0] -= 1
 
         # Calibration
         if len(locs) % 2 != 0:
             locs = np.append(locs, len(x) - 1)
 
-        if locs_type == '1d':
-            return locs
-        else:
-            return self._get_paired_locs(locs, successive=False)
+        signs = signs[locs]
+        signs = np.where(signs < 0, 0, 1)
+
+        events = list(zip(locs, signs))
+
+        return events
+        # if locs_type == '1d':
+        #     return locs
+        # else:
+        #     return self._get_paired_locs(locs, successive=False)
 
 
 class DerivativeEvent(EventDetector):
@@ -88,10 +126,14 @@ class DerivativeEvent(EventDetector):
         else:
             self._objective_fn = objective_fn
 
+    @property
+    def event_name(self):
+        return "Derivative of %s" % self._objective_fn.__name__
+
     def detect(
         self,
         x: np.ndarray,
-        locs_type: str = '2d',
+        # locs_type: str = '2d',
     ) -> list[tuple[int, int]]:
         if len(x.shape) != 2:
             raise NotImplementedError
@@ -110,9 +152,11 @@ class DerivativeEvent(EventDetector):
             cl = AgglomerativeClustering(n_clusters=None,
                                          distance_threshold=self._beta)
             clusters = cl.fit_predict(locs.reshape(-1, 1))
+
             for cluster in np.unique(clusters):
                 cluster_locs = locs[clusters == cluster]
                 locs_upd.append(cluster_locs[0])
+
             locs = np.sort(locs_upd)
 
         # Calibration
@@ -120,10 +164,19 @@ class DerivativeEvent(EventDetector):
             locs = np.append(locs, len(x) - 1)
         assert locs[-1] < len(x)
 
-        if locs_type == '1d':
-            return locs
-        else:
-            return self._get_paired_locs(locs, successive=True)
+        # Signs
+        signs = np.sign(dy[locs])
+        signs = np.where(signs < 0, 0, 1)
+
+        # Events
+        events = list(zip(locs, signs))
+
+        return events
+
+        # if locs_type == '1d':
+        #     return locs
+        # else:
+        #     return self._get_paired_locs(locs, successive=True)
 
 
 class SequentialEvent(EventDetector):
