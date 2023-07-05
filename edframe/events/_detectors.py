@@ -4,11 +4,12 @@ from typing import Optional, Union, Any, Callable
 from ..signals import rms
 
 import numpy as np
+import itertools as it
 
 
 # TODO striding window
 class EventDetector:
-    continuous = False
+    __continuous__ = False
 
     @property
     def defaults(self):
@@ -21,6 +22,9 @@ class EventDetector:
         else:
             return self._event_name
 
+    def is_continuous(self):
+        return self.__continuous__
+
     def __init__(self, event_name: Optional[str] = None) -> None:
         self._event_name = event_name
 
@@ -32,7 +36,7 @@ class EventDetector:
 
 
 class ThresholdEvent(EventDetector):
-    continuous = False 
+    __continuous__ = False
 
     def __init__(
         self,
@@ -83,14 +87,10 @@ class ThresholdEvent(EventDetector):
         events = list(zip(locs, signs))
 
         return events
-        # if locs_type == '1d':
-        #     return locs
-        # else:
-        #     return self._get_paired_locs(locs, successive=False)
 
 
 class DerivativeEvent(EventDetector):
-    continuous = True
+    __continuous__ = True
 
     def __init__(
         self,
@@ -157,48 +157,56 @@ class DerivativeEvent(EventDetector):
 
 
 class ROI:
+
     def __init__(self, detectors: list[EventDetector]):
         self._detectors = detectors
 
-    def __call__(self, x: Union[PowerSample, np.ndarray]):
-        events0 = self._detectors[0](x)
-        events0 = self._get_intervals(events0, self._detectors[0].continuous)
+    def __call__(
+        self,
+        x: Union[PowerSample, np.ndarray],
+    ) -> Union[PowerSample, np.ndarray]:
+        return self._get(x, self._detectors)
 
-        if len(self._detectors) > 1:
-            locs_prime = []
+    def _get(
+        self,
+        x: Union[PowerSample, np.ndarray],
+        detectors: list[EventDetector],
+    ) -> list[Union[PowerSample, np.ndarray]]:
+        detector0 = detectors[0]
+        events0 = detector0(x)
+        locs0, _ = tuple(zip(*events0))
 
-            for (a0, b0), _ in events0:
-                xab0 = x[a0:b0 + 1]
-
-                if len(xab0) > 1:
-                    locs = self(self._detectors[1:], xab0)
-                    locs = [(a + a0, b + a0) for a, b in locs]
+        if detector0.is_continuous():
+            locs2d0 = []
+            for i in range(1, len(locs0)):
+                a = locs0[i - 1]
+                if i == len(locs0) - 1:
+                    b = locs0[i]
                 else:
-                    locs = [(a0, b0)]
-
-                locs_prime.extend(locs)
-            return locs_prime
+                    b = locs0[i] - 1
+                locs2d0.append([a, b])
         else:
-            return locs0
+            locs2d0 = [locs0[i:i + 2] for i in range(0, len(locs0), 2)]
 
-    @staticmethod
-    def _get_intervals(events, continuous: bool = False):
-        if  continuous:
-            pairs = []
-            for i in range(1, len(locs)):
-                a = locs[i - 1]
-                if i == len(locs) - 1:
-                    b = locs[i]
-                else:
-                    b = locs[i] - 1
-                pairs.append((a, b))
-            return pairs
-        else:
-            return list(map(tuple, locs.reshape(-1, 2)))
+        del locs0
 
-    @staticmethod
-    def _get_unpaired_locs(locs2d):
-        # TODO successive
-        locs = list(map(lambda x: x[0], locs2d))
-        locs += [locs2d[-1][1] + 1]
-        return locs
+        roi = []
+
+        print(locs2d0)
+        for a0, b0 in locs2d0:
+            xab0 = x[a0:b0 + 1]
+
+            if len(detectors) > 1 and len(xab0) > 1:
+                # locs2d1 = []
+
+                # if len(xab0) > 1:
+                roi.extend(self._get(xab0, detectors[1:]))
+                # locs2d = [(a + a0, b + a0) for a, b in locs2d]
+                # else:
+                # locs2d = [(a0, b0)]
+
+                # locs2d1.extend(locs2d)
+            else:
+                roi.append(xab0)
+
+        return roi
