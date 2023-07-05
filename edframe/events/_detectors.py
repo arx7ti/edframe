@@ -1,10 +1,12 @@
 from __future__ import annotations
+
 from sklearn.cluster import AgglomerativeClustering
-from typing import Optional, Union, Any, Callable
-from ..signals import rms
+from typing import Optional, Union, Any, Callable, Iterable
 
 import numpy as np
 import itertools as it
+
+from ..signals import rms
 
 
 # TODO striding window
@@ -158,7 +160,10 @@ class DerivativeEvent(EventDetector):
 
 class ROI:
 
-    def __init__(self, detectors: list[EventDetector]):
+    def __init__(self, detectors: Union[EventDetector, list[EventDetector]]):
+        if not isinstance(detectors, Iterable):
+            detectors = [detectors]
+
         self._detectors = detectors
 
     def __call__(
@@ -192,20 +197,11 @@ class ROI:
 
         roi = []
 
-        print(locs2d0)
         for a0, b0 in locs2d0:
             xab0 = x[a0:b0 + 1]
 
             if len(detectors) > 1 and len(xab0) > 1:
-                # locs2d1 = []
-
-                # if len(xab0) > 1:
                 roi.extend(self._get(xab0, detectors[1:]))
-                # locs2d = [(a + a0, b + a0) for a, b in locs2d]
-                # else:
-                # locs2d = [(a0, b0)]
-
-                # locs2d1.extend(locs2d)
             else:
                 roi.append(xab0)
 
