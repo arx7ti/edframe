@@ -8,6 +8,8 @@ import numpy as np
 
 # TODO striding window
 class EventDetector:
+    continuous = False
+
     @property
     def defaults(self):
         return {'objective_fn': rms}
@@ -28,30 +30,10 @@ class EventDetector:
     def detect(self, x):
         raise NotImplementedError
 
-    @staticmethod
-    def _get_paired_locs(locs, successive: bool = False):
-        if successive:
-            pairs = []
-            for i in range(1, len(locs)):
-                a = locs[i - 1]
-                if i == len(locs) - 1:
-                    b = locs[i]
-                else:
-                    b = locs[i] - 1
-                pairs.append((a, b))
-            return pairs
-        else:
-            return list(map(tuple, locs.reshape(-1, 2)))
-
-    @staticmethod
-    def _get_unpaired_locs(locs2d):
-        # TODO successive
-        locs = list(map(lambda x: x[0], locs2d))
-        locs += [locs2d[-1][1] + 1]
-        return locs
-
 
 class ThresholdEvent(EventDetector):
+    continuous = False 
+
     def __init__(
         self,
         alpha: float = 0.05,
@@ -108,6 +90,8 @@ class ThresholdEvent(EventDetector):
 
 
 class DerivativeEvent(EventDetector):
+    continuous = True
+
     def __init__(
         self,
         alpha: float = 0.05,
@@ -115,12 +99,14 @@ class DerivativeEvent(EventDetector):
         interia: bool = True,
         relative: bool = True,
         objective_fn: str = None,
+        event_name: Optional[str] = None,
     ) -> None:
-        super().__init__()
+        super().__init__(event_name=event_name)
         self._alpha = alpha
         self._beta = beta
         self._interia = interia
         self._relative = relative
+
         if objective_fn is None:
             self._objective_fn = self.defaults['objective_fn']
         else:
@@ -130,11 +116,7 @@ class DerivativeEvent(EventDetector):
     def event_name(self):
         return "Derivative of %s" % self._objective_fn.__name__
 
-    def detect(
-        self,
-        x: np.ndarray,
-        # locs_type: str = '2d',
-    ) -> list[tuple[int, int]]:
+    def detect(self, x: np.ndarray) -> list[tuple[int, int]]:
         if len(x.shape) != 2:
             raise NotImplementedError
 
@@ -173,33 +155,23 @@ class DerivativeEvent(EventDetector):
 
         return events
 
-        # if locs_type == '1d':
-        #     return locs
-        # else:
-        #     return self._get_paired_locs(locs, successive=True)
 
-
-class SequentialEvent(EventDetector):
-    def __init__(self, detectors: list[EventDetector]) -> None:
-        super().__init__()
+class ROI:
+    def __init__(self, detectors: list[EventDetector]):
         self._detectors = detectors
 
-    @classmethod
-    def _apply_detectors(
-        cls,
-        detectors: list[EventDetector],
-        x: np.ndarray,
-    ) -> np.ndarray:
-        locs0 = detectors[0].detect(x, locs_type='2d')
+    def __call__(self, x: Union[PowerSample, np.ndarray]):
+        events0 = self._detectors[0](x)
+        events0 = self._get_intervals(events0, self._detectors[0].continuous)
 
-        if len(detectors) > 1:
+        if len(self._detectors) > 1:
             locs_prime = []
 
-            for a0, b0 in locs0:
+            for (a0, b0), _ in events0:
                 xab0 = x[a0:b0 + 1]
 
                 if len(xab0) > 1:
-                    locs = cls._apply_detectors(detectors[1:], xab0)
+                    locs = self(self._detectors[1:], xab0)
                     locs = [(a + a0, b + a0) for a, b in locs]
                 else:
                     locs = [(a0, b0)]
@@ -209,10 +181,24 @@ class SequentialEvent(EventDetector):
         else:
             return locs0
 
-    def detect(self, x: np.ndarray, locs_type: str = '2d') -> np.ndarray:
-        locs = self._apply_detectors(self._detectors, x)
-
-        if locs_type == '1d':
-            return self._get_unpaired_locs(locs)
+    @staticmethod
+    def _get_intervals(events, continuous: bool = False):
+        if  continuous:
+            pairs = []
+            for i in range(1, len(locs)):
+                a = locs[i - 1]
+                if i == len(locs) - 1:
+                    b = locs[i]
+                else:
+                    b = locs[i] - 1
+                pairs.append((a, b))
+            return pairs
         else:
-            return locs
+            return list(map(tuple, locs.reshape(-1, 2)))
+
+    @staticmethod
+    def _get_unpaired_locs(locs2d):
+        # TODO successive
+        locs = list(map(lambda x: x[0], locs2d))
+        locs += [locs2d[-1][1] + 1]
+        return locs
