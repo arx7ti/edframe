@@ -9,7 +9,6 @@ import itertools as it
 from ..signals import rms
 
 
-# TODO striding window
 class EventDetector:
     __continuous__ = False
 
@@ -66,9 +65,6 @@ class ThresholdEvent(EventDetector):
             return self._event_name
 
     def detect(self, x):
-        if len(x.shape) != 2:
-            raise NotImplementedError
-
         y = np.apply_along_axis(self._objective_fn, axis=1, arr=x)
         f = (y > self._alpha).astype(int)
         df = np.diff(f, prepend=False)
@@ -102,6 +98,8 @@ class DerivativeEvent(EventDetector):
         relative: bool = True,
         objective_fn: str = None,
         event_name: Optional[str] = None,
+        # window_size: int=80,
+        # drop_last: bool=True,
     ) -> None:
         super().__init__(event_name=event_name)
         self._alpha = alpha
@@ -119,8 +117,11 @@ class DerivativeEvent(EventDetector):
         return "Derivative of %s" % self._objective_fn.__name__
 
     def detect(self, x: np.ndarray) -> list[tuple[int, int]]:
-        if len(x.shape) != 2:
-            raise NotImplementedError
+        # TODO Ivan :: striding window
+        # Now x -> 1d
+        # need to split x into windows
+        # IMPORTANT ASSUMPTION: drop last window
+        # CODE HERE
 
         y = np.apply_along_axis(self._objective_fn, axis=1, arr=x)
         dy = np.diff(y, prepend=np.NINF)
