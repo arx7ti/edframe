@@ -2,9 +2,30 @@ from __future__ import annotations
 
 from numbers import Number
 from typing import Callable
+from sklearn.exceptions import NotFittedError
+
+import inspect
 
 
 class Feature:
+
+    @property
+    def verbose_name(self):
+        return self._verbose_name
+
+    @property
+    def estimator(self):
+        if self.is_estimator():
+            return self._fn
+        else:
+            raise AttributeError
+
+    @property
+    def transform(self):
+        if self.is_estimator():
+            raise AttributeError
+        else:
+            return self._fn
 
     def __init__(
         self,
@@ -15,14 +36,17 @@ class Feature:
         check_fn: Callable = None,
     ):
         self._fn = fn
-        self._verbose_name = fn.__name__ if verbose_name is None else verbose_name
+
+        if verbose_name is None:
+            if inspect.isclass(fn):
+                verbose_name = fn.__class__.__name__
+            else:
+                verbose_name = fn.__name__
+
+        self._verbose_name = verbose_name
         self._numerical = numerical
         self._vector = vector
         self._check_fn = check_fn
-
-    @property
-    def verbose_name(self):
-        return self._verbose_name
 
     def __str__(self):
         return self.verbose_name
@@ -30,26 +54,43 @@ class Feature:
     def __repr__(self):
         return str(self)
 
-    def isnumerical(self):
+    def is_numerical(self):
         return self._numerical
 
-    def isvector(self):
+    def is_vector(self):
         return self._vector
+
+    def is_estimator(self):
+        return hasattr(self._fn, "fit") and hasattr(self._fn, "transform")
 
     def __call__(self, x: PowerSample | np.ndarray, *args, **kwargs):
 
         if self._check_fn is not None:
             self._check_fn(x)
 
-        x = self._fn(x, *args, **kwargs)
+        if self.is_estimator():
+            # self.estimator.fit(x, *args, **kwargs)
+            transform = self.estimator.transform
+            x = [x]
+        else:
+            transform = self.transform
 
-        if self.isnumerical() and not isinstance(x, Number):
+        try:
+            x = transform(x, *args, **kwargs)
+        except NotFittedError:
+            raise ValueError("The feature estimator was not fitted. "\
+                            "Call this feature on a dataset first")
+
+        if self.is_estimator():
+            x = x[0]
+
+        if self.is_numerical() and not isinstance(x, Number):
             raise AttributeError
 
-        if self.isvector() and not isinstance(x, Iterable):
+        if self.is_vector() and not isinstance(x, Iterable):
             raise AttributeError
 
-        if self.isvector():
+        if self.is_vector():
             x = [x for x in x]
 
         return x
