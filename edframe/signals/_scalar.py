@@ -15,7 +15,7 @@ def temporal_centroid(x):
     return x
 
 
-def spf(x):
+def spectral_flatness(x):
     x = np.abs(np.fft.rfft(x))[2:]
     x = np.power(np.prod(x), 1 / len(x)) / np.mean(x)
     return x
