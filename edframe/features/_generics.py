@@ -1,15 +1,23 @@
 from __future__ import annotations
 
 from numbers import Number
+from typing import Callable
 
 
 class Feature:
 
-    def __init__(self, fn, verbose_name: str = None, numerical=True, multioutput=False, check_fn: Callable = None):
+    def __init__(
+        self,
+        fn,
+        verbose_name: str = None,
+        numerical=True,
+        vector=False,
+        check_fn: Callable = None,
+    ):
         self._fn = fn
         self._verbose_name = fn.__name__ if verbose_name is None else verbose_name
         self._numerical = numerical
-        self._multioutput = multioutput
+        self._vector = vector
         self._check_fn = check_fn
 
     @property
@@ -25,8 +33,8 @@ class Feature:
     def isnumerical(self):
         return self._numerical
 
-    def ismultioutput(self):
-        return self._multioutput
+    def isvector(self):
+        return self._vector
 
     def __call__(self, x: PowerSample | np.ndarray, *args, **kwargs):
 
@@ -38,10 +46,10 @@ class Feature:
         if self.isnumerical() and not isinstance(x, Number):
             raise AttributeError
 
-        if self.ismultioutput() and not isinstance(x, Iterable):
+        if self.isvector() and not isinstance(x, Iterable):
             raise AttributeError
 
-        if self.ismultioutput():
+        if self.isvector():
             x = [x for x in x]
 
         return x
