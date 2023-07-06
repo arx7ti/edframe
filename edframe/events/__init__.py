@@ -1,1 +1,1 @@
-from ._detectors import DerivativeEvent
+from ._detectors import ThresholdEvent, DerivativeEvent, ROI

@@ -179,7 +179,7 @@ class ROI:
     ) -> list[Union[PowerSample, np.ndarray]]:
         detector0 = detectors[0]
         events0 = detector0(x)
-        locs0, _ = tuple(zip(*events0))
+        locs0, _ = zip(*events0)
 
         if detector0.is_continuous():
             locs2d0 = []
