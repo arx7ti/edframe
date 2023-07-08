@@ -1,14 +1,17 @@
 from __future__ import annotations
 
 from numbers import Number
+from beartype import abby
 from typing import Callable
 from sklearn.exceptions import NotFittedError
 
 import inspect
+import numpy as np
+
+from ..data.entities import PowerSample
 
 
 class Feature:
-
     @property
     def verbose_name(self):
         return self._verbose_name
@@ -63,23 +66,26 @@ class Feature:
     def is_estimator(self):
         return hasattr(self._fn, "fit") and hasattr(self._fn, "transform")
 
-    def __call__(self, x: PowerSample | np.ndarray, *args, **kwargs):
+    def __call__(self, x: PowerSample | list[PowerSample] | np.ndarray, *args,
+                 **kwargs):
 
         if self._check_fn is not None:
             self._check_fn(x)
 
         if self.is_estimator():
-            # self.estimator.fit(x, *args, **kwargs)
+            if abby.is_bearable(x, list[PowerSample]):
+                self.estimator.fit(x, *args, **kwargs)
+            else:
+                x = [x]
             transform = self.estimator.transform
-            x = [x]
         else:
             transform = self.transform
 
         try:
             x = transform(x, *args, **kwargs)
         except NotFittedError:
-            raise ValueError("The feature estimator was not fitted. "\
-                            "Call this feature on a dataset first")
+            raise ValueError("The feature estimator was not fitted. "
+                             "Call this feature on a dataset first")
 
         if self.is_estimator():
             x = x[0]
