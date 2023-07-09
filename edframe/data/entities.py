@@ -9,7 +9,6 @@ from beartype import abby
 from copy import deepcopy
 from beartype.typing import Iterable
 from typing import Optional, Callable, Union, Any, Iterable
-from edframe.data.entities import PowerSample
 
 from edframe.signals import F
 
@@ -148,6 +147,89 @@ class Backref(Generic):
         return self.update(data=self.__default_data__)
 
 
+class AttributeExtractors(Backref):
+
+    @property
+    def values(self):
+        values = [getattr(self, n) for n in self.names]
+        return values
+
+    def __after__(self, _, extractors):
+        names = []
+
+        for extractor in extractors:
+            if inspect.isclass(extractor):
+                attr_name = extractor.__class__.__name__
+            else:
+                attr_name = extractor.__name__
+                # In case if extractors is imported from the submodule and
+                # recalled with use of "as" operator
+                # e.g. import <package>.<extractor_name> as <extractor_name>
+                attr_name_split = attr_name.split('.')
+
+                if len(attr_name_split) > 1:
+                    attr_name = attr_name_split[-1]
+
+            setattr(self, attr_name, extractor)
+            names.append(attr_name)
+
+        self.names = names
+
+    def __str__(self) -> str:
+        ann = "Extractors(%s)" % ", ".join(self.names)
+        return ann
+
+    def __repr__(self) -> str:
+        return str(self)
+
+    def __getitem__(self, indexer):
+        attr_names = self._get_attr_names(indexer)
+        extractors = [getattr(self, n) for n in attr_names]
+
+        if isinstance(indexer, Iterable):
+            return self.update(data=extractors)
+        else:
+            extractor = getattr(self, attr_names[0])
+            return extractor
+
+    def _get_attr_name(self, indexer):
+        if isinstance(indexer, int):
+            if indexer > 0 and indexer < len(self.names):
+                attr_name = self.names[indexer]
+            else:
+                raise ValueError
+        elif isinstance(indexer, str):
+            if indexer in self.names:
+                attr_name = indexer
+            else:
+                raise ValueError
+
+        return attr_name
+
+    def _get_attr_names(self, indexer):
+        attr_names = []
+
+        if isinstance(indexer, Iterable):
+            for i in indexer:
+                attr_names.append(self._get_attr_name(i))
+        else:
+            attr_names.append(self._get_attr_name(indexer))
+
+        return attr_names
+
+    def pop(self, indexer):
+        attr_name = self._get_attr_name(indexer)
+        e = getattr(self, attr_name)
+        delattr(self, attr_name)
+        self.names.pop(self.names.index(attr_name))
+        return e
+
+    def drop(self, indexer):
+        attr_names = self._get_attr_names(indexer)
+        extractors = [getattr(self, n) for n in attr_names]
+        return self.update(data=extractors)
+
+
 class BackrefDataFrame(Backref):
 
     __default_data__ = pd.DataFrame()
@@ -168,6 +250,7 @@ class BackrefDataFrame(Backref):
         self,
         *indexer: Iterable[int | str],
     ) -> Backref:
+        # TODO if not Iterable then item only
 
         if len(indexer) == 2:
             rows, cols = indexer
@@ -205,74 +288,75 @@ class BackrefDataFrame(Backref):
 
     @property
     def extractors(self):
-        return self._extractors
+        return AttributeExtractors(self._extractors)
 
     def _check_callables(self, fs):
         pass
 
     def count(self):
-        return len(self.columns)
+        return len(self.names)
 
     def get(
-        self,
-        fs: Callable | Iterable[Callable],
-        variable: str = None,
-        **kwargs: Any,
+            self,
+            fns: Callable | Iterable[Callable],
+            source: str = None,  # FIXME remove attr, add sample method instead
     ) -> BackrefDataFrame:
 
-        self._check_callables(fs)
+        self._check_callables(fns)
 
-        if issubclass(self.backref.__class__, PowerSet):
-
-            df = pd.DataFrame()
-            extractors = []
-
-            for sample in self.backref.data:
-                features = sample.features.get(fs, variable=variable)
-                df = pd.concat((df, features.data), axis=0)
-                extractors.extend(features.extractors)
-
-            df = df.reset_index(drop=True)
-
-            return self.update(data=df, extractors=extractors)
-
+        if source is None:
+            source_data = self.backref.values
         else:
-            names = []
-            values = []
-            extractors = []
+            source_data = getattr(self.backref, source)
 
-            for f in fs:
-                name = str(f)
+        columns = []
+        values = []
 
-                if variable is None:
-                    source = self.backref.values
+        for fn in fns:
+            if source is None:
+                column = str(fn)
+            else:
+                column = "%s_%s" % (source, str(fn))
+
+            # TODO Iterable[PowerSample]
+            # TODO to Feature.__call__
+            tmp = []
+            if abby.is_bearable(source_data, list[PowerSample]):
+                for source_data_i in source_data:
+                    tmp.append(fn(source_data_i))
+            else:
+                tmp = fn(source_data)
+
+                if fn.is_vector():
+                    values.extend(tmp)
                 else:
-                    name = "%s_%s" % (variable, name)
-                    source = getattr(self.backref, variable)
+                    values.append(tmp)
 
-                names.append(name)
-                values.append(f(source))
-                extractors.append(f)
+            if fn.is_vector():
+                columns.extend([column + "_%i" % i for i in range(fn.numel())])
+            else:
+                columns.append(column)
 
-            df = pd.DataFrame([values], columns=names)
+        values = np.asarray(values)
+        df = pd.DataFrame(values, columns=columns)
 
-            return self.update(data=df, extractors=extractors)
+        return self.update(data=df, _extractors=list(fns))
 
     def pop(self, name: str) -> pd.Series:
         item = self.data.pop(name)
+        idx = self.names.index(name)
+        self.extractors.pop(idx)
         return item
 
     def drop(self, names: Iterable[str]) -> BackrefDataFrame:
-
         values = self.data.drop(names, axis=1)
-
-        return self.update(data=values)
+        extractors = self.extractors.drop(names).values
+        return self.update(data=values, _extractors=extractors)
 
     def stack(self, inst: BackrefDataFrame) -> BackrefDataFrame:
-
         df = pd.concat((self.data, inst.data), axis=1)
-
-        return self.update(data=df)
+        extractors = self.extractors.values + inst.extractors.values
+        return self.update(data=df, _extractors=extractors)
 
     # def (self, inst: BackrefDataFrame) -> BackrefDataFrame:
 
@@ -285,6 +369,7 @@ class BackrefDataFrame(Backref):
 
 
 class Events(BackrefDataFrame):
+
     @property
     def data(self) -> pd.DataFrame:
         return self._data
@@ -298,6 +383,7 @@ class Events(BackrefDataFrame):
 
 
 class Features(BackrefDataFrame):
+
     @property
     def data(self) -> pd.DataFrame:
         return self._data
@@ -316,9 +402,9 @@ class Features(BackrefDataFrame):
 
         if self.backref == features.backref:
             if isinstance(features, Events):
-                values = self.concat(features.to_features())
+                values = self.stack(features.to_features())
             elif isinstance(features, Features):
-                values = self.concat(features)
+                values = self.stack(features)
             else:
                 raise ValueError
         else:
@@ -351,7 +437,7 @@ class Components(Backref):
     #     # TODO Can't add components of different sampling rates
     #     # self._check_values(values)
 
-    def __after__(self):
+    def __after__(self, *args, **kwargs):
         self._is_allowed_transform = False
 
     def __getitem__(
@@ -466,6 +552,7 @@ class LockedError(Exception):
 
 
 class GenericState:
+
     def __init__(self) -> None:
         self._locked = False
         self._msg = ""
@@ -502,8 +589,10 @@ class PowerSample(Generic):
         values_attr = None
 
     class State(GenericState):
+
         @classmethod
         def check(cls, method: Callable):
+
             def wrapper(self, *args, **kwargs):
                 if not issubclass(self.__class__, PowerSample):
                     raise ValueError("Argument \"self\" is required")
@@ -528,6 +617,7 @@ class PowerSample(Generic):
 
         @classmethod
         def check_init_args(cls, method):
+
             def wrapper(*args, **kwargs):
                 labels = kwargs.get("labels", None)
                 appliances = kwargs.get("appliances", None)
@@ -624,6 +714,9 @@ class PowerSample(Generic):
         self.__backref__(components=components)
 
         self.state = self.State()
+
+    def __len__(self):
+        return len(self.values)
 
     def is_lazy(self):
         return self.data is None
@@ -728,6 +821,7 @@ class PowerSample(Generic):
 
 
 class VISample(PowerSample):
+
     class Meta:
         values_attr = "i"
 
@@ -780,7 +874,8 @@ class VISample(PowerSample):
         return self.v * self.i
 
 
-class PowerSet(Generic):
+class DataSet(Generic):
+    # TODO for each task its own implementation
     events = Events
     features = Features
 
@@ -828,7 +923,24 @@ class PowerSet(Generic):
 
         return self.update(data=data)
 
+    def is_aligned(self):
+        lens = [len(s.values) for s in self.data]
+        lens = np.asarray(lens)
+        return all(lens[0] == lens[1:])
+
     # TODO
     # def map(self, fs):
     #     data = []
     #     return data
+
+
+class VIDataSet(DataSet):
+
+    @property
+    def values(self):
+        values = [s.values for s in self.data]
+
+        if self.is_aligned():
+            values = np.asarray(values)
+
+        return values
