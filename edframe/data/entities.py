@@ -9,6 +9,7 @@ from beartype import abby
 from copy import deepcopy
 from beartype.typing import Iterable
 from typing import Optional, Callable, Union, Any, Iterable
+from edframe.data.entities import PowerSample
 
 from edframe.signals import F
 
@@ -81,10 +82,10 @@ class Backref(Generic):
     # TODO get source attr by method
     # ___attr__ = None
 
-    def __before__(self):
+    def __before__(self, backref, data=None):
         pass
 
-    def __after__(self):
+    def __after__(self, backref, data=None):
         pass
 
     def __init__(
@@ -93,7 +94,7 @@ class Backref(Generic):
         data: Optional[Any] = None,
     ) -> None:
 
-        self.__before__()
+        self.__before__(backref, data=data)
 
         self._backref = backref
 
@@ -102,7 +103,7 @@ class Backref(Generic):
         else:
             self._data = data
 
-        self.__after__()
+        self.__after__(backref, data=data)
 
     @property
     def backref(self):
@@ -156,6 +157,12 @@ class BackrefDataFrame(Backref):
     # def __str__(self):
     #     return self.__verbose__.format(cls=self.__class__.__name__,
     #                                    values=self.values)
+    # def __init__(self, backref: PowerSample | None, data: Any | None = None) -> None:
+    #     super().__init__(backref, data)
+
+    def __after__(self, *args, **kwargs):
+        # TODO handle extractors in the old methods
+        self._extractors = []
 
     def __getitem__(
         self,
@@ -196,6 +203,10 @@ class BackrefDataFrame(Backref):
         """
         return self.data.columns.values
 
+    @property
+    def extractors(self):
+        return self._extractors
+
     def _check_callables(self, fs):
         pass
 
@@ -206,6 +217,7 @@ class BackrefDataFrame(Backref):
         self,
         fs: Callable | Iterable[Callable],
         variable: str = None,
+        **kwargs: Any,
     ) -> BackrefDataFrame:
 
         self._check_callables(fs)
@@ -213,18 +225,21 @@ class BackrefDataFrame(Backref):
         if issubclass(self.backref.__class__, PowerSet):
 
             df = pd.DataFrame()
+            extractors = []
 
             for sample in self.backref.data:
                 features = sample.features.get(fs, variable=variable)
                 df = pd.concat((df, features.data), axis=0)
+                extractors.extend(features.extractors)
 
             df = df.reset_index(drop=True)
 
-            return self.update(data=df)
+            return self.update(data=df, extractors=extractors)
 
         else:
             names = []
             values = []
+            extractors = []
 
             for f in fs:
                 name = str(f)
@@ -237,10 +252,11 @@ class BackrefDataFrame(Backref):
 
                 names.append(name)
                 values.append(f(source))
+                extractors.append(f)
 
             df = pd.DataFrame([values], columns=names)
 
-            return self.update(data=df)
+            return self.update(data=df, extractors=extractors)
 
     def pop(self, name: str) -> pd.Series:
         item = self.data.pop(name)
@@ -269,7 +285,6 @@ class BackrefDataFrame(Backref):
 
 
 class Events(BackrefDataFrame):
-
     @property
     def data(self) -> pd.DataFrame:
         return self._data
@@ -283,7 +298,6 @@ class Events(BackrefDataFrame):
 
 
 class Features(BackrefDataFrame):
-
     @property
     def data(self) -> pd.DataFrame:
         return self._data
@@ -359,8 +373,9 @@ class Components(Backref):
                       tuple[np.ndarray, ...]],
     ) -> None:
 
-        if abby.is_bearable(values, (list[np.ndarray],\
-                                      set[np.ndarray], tuple[np.ndarray, ...])):
+        if abby.is_bearable(
+                values,
+            (list[np.ndarray], set[np.ndarray], tuple[np.ndarray, ...])):
             values = np.stack(values, axis=0)
         elif not isinstance(values, np.ndarray):
             raise ValueError
@@ -451,7 +466,6 @@ class LockedError(Exception):
 
 
 class GenericState:
-
     def __init__(self) -> None:
         self._locked = False
         self._msg = ""
@@ -488,10 +502,8 @@ class PowerSample(Generic):
         values_attr = None
 
     class State(GenericState):
-
         @classmethod
         def check(cls, method: Callable):
-
             def wrapper(self, *args, **kwargs):
                 if not issubclass(self.__class__, PowerSample):
                     raise ValueError("Argument \"self\" is required")
@@ -516,7 +528,6 @@ class PowerSample(Generic):
 
         @classmethod
         def check_init_args(cls, method):
-
             def wrapper(*args, **kwargs):
                 labels = kwargs.get("labels", None)
                 appliances = kwargs.get("appliances", None)
@@ -717,7 +728,6 @@ class PowerSample(Generic):
 
 
 class VISample(PowerSample):
-
     class Meta:
         values_attr = "i"
 
