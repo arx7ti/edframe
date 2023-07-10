@@ -9,6 +9,6 @@ def fft_amplitudes(x):
     return x
 
 
-def fft_amplitudes_check_fn(x):
+def fft_amplitudes_check_fn(x, *args, **kwargs):
     if len(x.shape) > 1:
         raise ValueError
