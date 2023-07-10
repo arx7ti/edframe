@@ -309,7 +309,7 @@ class BackrefDataFrame(Backref):
 
         for fn in fns:
             tmp = fn(self.backref)
-            col = str(fn)
+            col = fn.verbose_name
 
             # TODO this is for class Features only. Todo if called from class Events
             if fn.is_vector():
