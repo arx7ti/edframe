@@ -1,2 +1,2 @@
-from ._generics import Feature
-from ._hf_features import SpectralCentroid, TemporalCentroid, RMS, SpectralFlatness, FourierAmplitudes, PrincipalComponents, IndependentComponents
+from ._scalar import SpectralCentroid, TemporalCentroid, SpectralFlatness, RMS
+from ._vector import FourierAmplitudes, PrincipalComponents, IndependentComponents
