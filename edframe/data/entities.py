@@ -154,21 +154,22 @@ class AttributeExtractors(Backref):
         values = [getattr(self, n) for n in self.names]
         return values
 
-    def __after__(self, _, extractors):
+    def __after__(self, _, data):
         names = []
 
-        for extractor in extractors:
+        for extractor in data:
             if inspect.isclass(extractor):
-                attr_name = extractor.__class__.__name__
-            else:
                 attr_name = extractor.__name__
-                # In case if extractors is imported from the submodule and
-                # recalled with use of "as" operator
-                # e.g. import <package>.<extractor_name> as <extractor_name>
-                attr_name_split = attr_name.split('.')
+            else:
+                attr_name = extractor.__class__.__name__
 
-                if len(attr_name_split) > 1:
-                    attr_name = attr_name_split[-1]
+            attr_name = attr_name.split('.')[-1]
+
+            # if extractor.is_estimator():
+            #     attr_value = extractor.estimator
+            # else:
+            #     attr_value = extractor.transform
+            # setattr(self, attr_name, attr_value)
 
             setattr(self, attr_name, extractor)
             names.append(attr_name)
@@ -288,7 +289,7 @@ class BackrefDataFrame(Backref):
 
     @property
     def extractors(self):
-        return AttributeExtractors(self._extractors)
+        return AttributeExtractors(self, data=self._extractors)
 
     def _check_callables(self, fs):
         pass
@@ -297,47 +298,32 @@ class BackrefDataFrame(Backref):
         return len(self.names)
 
     def get(
-            self,
-            fns: Callable | Iterable[Callable],
-            source: str = None,  # FIXME remove attr, add sample method instead
+        self,
+        fns: Callable | Iterable[Callable],
+        # source: str = None,  # FIXME remove attr, add sample method instead
     ) -> BackrefDataFrame:
-
         self._check_callables(fns)
-
-        if source is None:
-            source_data = self.backref.values
-        else:
-            source_data = getattr(self.backref, source)
 
         columns = []
         values = []
 
         for fn in fns:
-            if source is None:
-                column = str(fn)
-            else:
-                column = "%s_%s" % (source, str(fn))
+            tmp = fn(self.backref)
+            col = str(fn)
 
-            # TODO Iterable[PowerSample]
-            # TODO to Feature.__call__
-            tmp = []
-            if abby.is_bearable(source_data, list[PowerSample]):
-                for source_data_i in source_data:
-                    tmp.append(fn(source_data_i))
-            else:
-                tmp = fn(source_data)
-
-                if fn.is_vector():
-                    values.extend(tmp)
-                else:
-                    values.append(tmp)
-
+            # TODO this is for class Features only. Todo if called from class Events
             if fn.is_vector():
-                columns.extend([column + "_%i" % i for i in range(fn.numel())])
+                values.extend(tmp)
+                columns.extend([f"{col}{i}" for i in range(fn.size)])
             else:
-                columns.append(column)
+                values.append(tmp)
+                columns.append(col)
 
         values = np.asarray(values)
+
+        if isinstance(self, PowerSample):
+            values = values[None]
+
         df = pd.DataFrame(values, columns=columns)
 
         return self.update(data=df, _extractors=list(fns))
