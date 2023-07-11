@@ -31,24 +31,25 @@ class EventDetector:
 
     def __call__(self, x: np.ndarray) -> list[tuple[str, int, Any]]:
         return self.detect(x)
-    
+
     def _windowing(self, x, window_size, drop_last):
         if len(x.shape) == 1:
             L = x.shape[0]
             if L % window_size != 0:
-                drop_len = L % window_size # in case of dropping last not-full window
-                pad_len = window_size - (L % window_size) # in case of padding last not-full window
+                drop_len = L % window_size  # in case of dropping last not-full window
+                pad_len = window_size - (
+                    L % window_size)  # in case of padding last not-full window
 
                 if pad_len > 0 and drop_last:
                     x = x[:L - drop_len]
-                else: 
-                    x = np.concatenate((x, np.zeros(pad_len))) # padding with zeros
-                
+                else:
+                    x = np.concatenate(
+                        (x, np.zeros(pad_len)))  # padding with zeros
+
             x = x.reshape(x.shape[0] // window_size, window_size)
-            
-        
-        else: # impelent to use on full dataset of shape [n_samples, len_of_sample]
-        # len(x.shape) >= 2:
+
+        else:  # impelent to use on full dataset of shape [n_samples, len_of_sample]
+            # len(x.shape) >= 2:
             print('currently implemented for 1D arrays only')
             raise NotImplemented
 
@@ -61,15 +62,13 @@ class EventDetector:
 class ThresholdEvent(EventDetector):
     __continuous__ = False
 
-    def __init__(
-        self,
-        alpha: float = 0.05,
-        objective_fn: str = None,
-        above: bool = True,
-        event_name: Optional[str] = None,
-        window_size: int = 80,
-        drop_last: bool = True
-    ) -> None:
+    def __init__(self,
+                 alpha: float = 0.05,
+                 objective_fn: str = None,
+                 above: bool = True,
+                 event_name: Optional[str] = None,
+                 window_size: int = 80,
+                 drop_last: bool = True) -> None:
         super().__init__(event_name=event_name)
         self._alpha = alpha
         self._window_size = window_size
@@ -91,11 +90,11 @@ class ThresholdEvent(EventDetector):
             return self._event_name
 
     def detect(self, x):
-        
+
         #################
         x = self._windowing(x, self._window_size, self._drop_last)
         #################
-        
+
         y = np.apply_along_axis(self._objective_fn, axis=1, arr=x)
         f = (y > self._alpha).astype(int)
         df = np.diff(f, prepend=False)
@@ -129,8 +128,8 @@ class DerivativeEvent(EventDetector):
         relative: bool = True,
         objective_fn: str = None,
         event_name: Optional[str] = None,
-        window_size: int=80,
-        drop_last: bool=True,
+        window_size: int = 80,
+        drop_last: bool = True,
     ) -> None:
         super().__init__(event_name=event_name)
         self._alpha = alpha
@@ -155,7 +154,7 @@ class DerivativeEvent(EventDetector):
         # need to split x into windows
         # IMPORTANT ASSUMPTION: drop last window
         # CODE HERE
-        
+
         ######################
         x = self._windowing(x, self._window_size, self._drop_last)
         ######################
@@ -191,7 +190,7 @@ class DerivativeEvent(EventDetector):
         signs = np.where(signs < 0, 0, 1)
 
         # Events
-        events = list(zip(locs, signs))
+        events = list(zip(locs * self._window_size, signs))
 
         return events
 
