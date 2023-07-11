@@ -17,17 +17,17 @@ class EventDetector:
         return {'objective_fn': rms}
 
     @property
-    def event_name(self):
-        if self._event_name is None:
+    def verbose_name(self):
+        if self._verbose_name is None:
             return "Unnamed Event of %s" % self.__class__.__name__
         else:
-            return self._event_name
+            return self._verbose_name
 
     def is_continuous(self):
         return self.__continuous__
 
-    def __init__(self, event_name: Optional[str] = None) -> None:
-        self._event_name = event_name
+    def __init__(self, verbose_name: Optional[str] = None) -> None:
+        self._verbose_name = verbose_name
 
     def __call__(self, x: np.ndarray) -> list[tuple[str, int, Any]]:
         return self.detect(x)
@@ -66,10 +66,10 @@ class ThresholdEvent(EventDetector):
                  alpha: float = 0.05,
                  objective_fn: str = None,
                  above: bool = True,
-                 event_name: Optional[str] = None,
+                 verbose_name: Optional[str] = None,
                  window_size: int = 80,
                  drop_last: bool = True) -> None:
-        super().__init__(event_name=event_name)
+        super().__init__(verbose_name=verbose_name)
         self._alpha = alpha
         self._window_size = window_size
         self._drop_last = drop_last
@@ -82,12 +82,12 @@ class ThresholdEvent(EventDetector):
         self._above = above
 
     @property
-    def event_name(self):
-        if self._event_name is None:
+    def verbose_name(self):
+        if self._verbose_name is None:
             return "%s threshold of %s" % ("Above" if self._above else "Below",
                                            self._objective_fn.__name__)
         else:
-            return self._event_name
+            return self._verbose_name
 
     def detect(self, x):
 
@@ -127,11 +127,11 @@ class DerivativeEvent(EventDetector):
         interia: bool = True,
         relative: bool = True,
         objective_fn: str = None,
-        event_name: Optional[str] = None,
+        verbose_name: Optional[str] = None,
         window_size: int = 80,
         drop_last: bool = True,
     ) -> None:
-        super().__init__(event_name=event_name)
+        super().__init__(verbose_name=verbose_name)
         self._alpha = alpha
         self._beta = beta
         self._interia = interia
@@ -145,7 +145,7 @@ class DerivativeEvent(EventDetector):
             self._objective_fn = objective_fn
 
     @property
-    def event_name(self):
+    def verbose_name(self):
         return "Derivative of %s" % self._objective_fn.__name__
 
     def detect(self, x: np.ndarray) -> list[tuple[int, int]]:
