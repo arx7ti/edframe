@@ -67,6 +67,7 @@ class Feature:
         return np.asarray(xlist)
 
     def __init__(self, **kwargs):
+        # TODO add verbose_name to kwargs
 
         if self.is_estimator() and self.is_transform():
             raise ValueError
