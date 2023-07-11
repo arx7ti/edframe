@@ -24,3 +24,14 @@ class IndependentComponents(Feature):
     estimator = FastICA
     __vector__ = True
     __verbose_name__ = "IC"
+
+    @property
+    def mixing(self) -> np.ndarray:
+        return self.estimator.mixing_
+
+    @property
+    def mean(self) -> np.ndarray | None:
+        if self.estimator.whiten:
+            return self.estimator.mean_
+        else:
+            return None
