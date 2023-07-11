@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Callable, Union, Self
+from typing import Callable, Union, Self, Any
 from numbers import Number
 from beartype.typing import Iterable
 from sklearn.base import BaseEstimator
@@ -42,20 +42,29 @@ class Feature:
         return name
 
     @classmethod
-    def _to_list(cls: Feature, x: Iterable) -> list[list]:
+    def _to_array(cls, x: Any) -> np.ndarray:
         if isinstance(x, np.ndarray):
-            return x.tolist()
+            return x
+
+        if isinstance(x, Iterable) and not isinstance(x, (list, tuple)):
+            x = list(x)
 
         if isinstance(x, Iterable):
-            xnew = []
+            xlist = []
             for _x in x:
-                if isinstance(_x, list):
-                    xnew.append(_x)
+                if isinstance(_x, (list, tuple)):
+                    xlist.append(_x)
                 else:
-                    xnew.append(cls._to_list(_x))
-            return xnew
+                    _xlist = [_x for _x in _x]
 
-        return x
+                    if any(isinstance(__x, Iterable) for __x in _xlist):
+                        raise ValueError
+
+                    xlist.append(_xlist)
+        else:
+            xlist = x
+
+        return np.asarray(xlist)
 
     def __init__(self, **kwargs):
 
@@ -68,6 +77,8 @@ class Feature:
         if self.is_estimator():
             self.estimator = self.estimator(**kwargs)
             self._fitted = False
+        else:
+            self.transform = self.__class__.transform
 
         if self.is_vector():
             self._size = None
@@ -110,27 +121,29 @@ class Feature:
 
             x = x if is_dataset else x[0]
         elif is_dataset:
+            shape = list(x.shape)
+            shape[-1] = 1
             x = np.apply_along_axis(
                 self.transform,
                 axis=-1,  # TODO axis support
                 arr=x,
                 *args,
                 **kwargs)
+            x = x.reshape(*shape)
         else:
             x = self.transform(x, *args, **kwargs)
 
         # TODO to np.ndarray
-        x = self._to_list(x)
+        x = self._to_array(x)
 
         if self.is_vector():
-            if (is_dataset and not abby.is_bearable(x, list[list]))\
-                or not (is_dataset or isinstance(x, list)):
+            if (is_dataset and len(x.shape) != 2)\
+                or (not is_dataset and len(x.shape) != 1):
                 raise ValueError
 
-            self._size = len(x[0]) if is_dataset else len(x)
+            self._size = x.shape[1] if is_dataset else x.shape[0]
 
-        if self.is_numerical() and\
-            not abby.is_bearable(x, list[list[Number]] | list[Number] | Number):
+        if self.is_numerical() and not np.issubdtype(x.dtype, np.number):
             raise ValueError
 
         return x

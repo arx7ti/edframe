@@ -313,16 +313,25 @@ class BackrefDataFrame(Backref):
 
             # TODO this is for class Features only. Todo if called from class Events
             if fn.is_vector():
-                values.extend(tmp)
+                # tmp -> 1000x20
+                # values.extend(tmp)
+                # values -> 1000x20
+                # if append -> 1x1000x20
                 columns.extend([f"{col}{i}" for i in range(fn.size)])
             else:
-                values.append(tmp)
+                # values.append(tmp)
                 columns.append(col)
 
-        values = np.asarray(values)
+            if len(tmp.shape) == 0:
+                tmp = tmp[None, None]
 
-        if isinstance(self, PowerSample):
-            values = values[None]
+            values.append(tmp)
+
+        # values = np.asarray(values)
+        values = np.concatenate(values, axis=1)
+
+        # if isinstance(self, PowerSample):
+        #     values = values[None]
 
         df = pd.DataFrame(values, columns=columns)
 
