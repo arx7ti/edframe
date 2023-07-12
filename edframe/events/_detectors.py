@@ -10,29 +10,34 @@ from ..signals import rms
 
 
 class EventDetector:
-    __continuous__ = False
-
-    @property
-    def defaults(self):
-        return {'objective_fn': rms}
+    __window__: Callable | None = None
+    __low__: bool = False
+    __high__: bool = False
+    __continuous__: bool = False
+    __verbose_name__: str | None = None
 
     @property
     def verbose_name(self):
-        if self._verbose_name is None:
-            return "Unnamed Event of %s" % self.__class__.__name__
+        if self.__verbose_name__ is None:
+            return "%s@Event" % self.__class__.__name__
         else:
-            return self._verbose_name
+            return self.__verbose_name__
 
     def is_continuous(self):
         return self.__continuous__
 
+    def is_compatible(self, obj):
+        # TODO check by __low__ and __high__ properties
+        return None
+
     def __init__(self, verbose_name: Optional[str] = None) -> None:
-        self._verbose_name = verbose_name
+        if verbose_name is not None:
+            self.__verbose_name__ = verbose_name
 
     def __call__(self, x: np.ndarray) -> list[tuple[str, int, Any]]:
         return self.detect(x)
 
-    def _windowing(self, x, window_size, drop_last):
+    def _striding_window_view(self, x, window_size, drop_last):
         if len(x.shape) == 1:
             L = x.shape[0]
             if L % window_size != 0:
@@ -81,18 +86,18 @@ class ThresholdEvent(EventDetector):
 
         self._above = above
 
-    @property
-    def verbose_name(self):
-        if self._verbose_name is None:
-            return "%s threshold of %s" % ("Above" if self._above else "Below",
-                                           self._objective_fn.__name__)
-        else:
-            return self._verbose_name
+    # @property
+    # def verbose_name(self):
+    #     if self._verbose_name is None:
+    #         return "%s threshold of %s" % ("Above" if self._above else "Below",
+    #                                        self._objective_fn.__name__)
+    #     else:
+    #         return self._verbose_name
 
     def detect(self, x):
 
         #################
-        x = self._windowing(x, self._window_size, self._drop_last)
+        x = self._striding_window_view(x, self._window_size, self._drop_last)
         #################
 
         y = np.apply_along_axis(self._objective_fn, axis=1, arr=x)
@@ -156,7 +161,7 @@ class DerivativeEvent(EventDetector):
         # CODE HERE
 
         ######################
-        x = self._windowing(x, self._window_size, self._drop_last)
+        x = self._striding_window_view(x, self._window_size, self._drop_last)
         ######################
 
         y = np.apply_along_axis(self._objective_fn, axis=1, arr=x)
@@ -196,7 +201,6 @@ class DerivativeEvent(EventDetector):
 
 
 class ROI:
-
     def __init__(self, detectors: Union[EventDetector, list[EventDetector]]):
         if not isinstance(detectors, Iterable):
             detectors = [detectors]
