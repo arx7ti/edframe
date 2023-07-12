@@ -6,7 +6,7 @@ from typing import Optional, Union, Any, Callable, Iterable
 import numpy as np
 import itertools as it
 
-from ..signals import rms
+from ..data.entities import PowerSample, DataSet
 
 
 class EventDetector:
@@ -19,44 +19,56 @@ class EventDetector:
     @property
     def verbose_name(self):
         if self.__verbose_name__ is None:
-            return "%s@Event" % self.__class__.__name__
+            return self.__class__.__name__
         else:
             return self.__verbose_name__
 
     def is_continuous(self):
         return self.__continuous__
 
-    def is_compatible(self, obj):
-        # TODO check by __low__ and __high__ properties
-        return None
+    def is_compatible(self, obj: PowerSample | DataSet | np.ndarray) -> bool:
+        if not (hasattr(obj, "__low__") or isinstance(obj, np.ndarray))\
+            and not (hasattr(obj, "__high__") or isinstance(obj, np.ndarray)):
+            return False
+
+        if not (self.__low__ == obj.__low__ == True
+                or self.__high__ == obj.__high__ == True):
+            return False
+
+        return True
 
     def __init__(self, verbose_name: Optional[str] = None) -> None:
+        if not self.__low__ and not self.__high__:
+            raise ValueError
+
+        if self.__window__ is None:
+            raise ValueError
+
         if verbose_name is not None:
             self.__verbose_name__ = verbose_name
 
     def __call__(self, x: np.ndarray) -> list[tuple[str, int, Any]]:
         return self.detect(x)
 
-    def _striding_window_view(self, x, window_size, drop_last):
-        if len(x.shape) == 1:
-            L = x.shape[0]
-            if L % window_size != 0:
-                drop_len = L % window_size  # in case of dropping last not-full window
-                pad_len = window_size - (
-                    L % window_size)  # in case of padding last not-full window
+    def _striding_window_view(self, x, window_size, drop_last: bool = True):
+        n = x.shape[-1]
+        axes = x.shape[:-1]
+        rem = n % window_size
 
-                if pad_len > 0 and drop_last:
-                    x = x[:L - drop_len]
-                else:
-                    x = np.concatenate(
-                        (x, np.zeros(pad_len)))  # padding with zeros
+        if rem > 0:
+            if drop_last:
+                # In case of dropping last not-full window:
+                x = x[..., :n - rem]
+            else:
+                # In case of padding last not-full window:
+                n_pad = window_size - (n % window_size)
 
-            x = x.reshape(x.shape[0] // window_size, window_size)
+                if n_pad > 0:
+                    # Padding with zeros
+                    x_pad = np.zeros((*axes, n_pad), dtype=x.dtype)
+                    x = np.concatenate((x, x_pad), axis=-1)
 
-        else:  # impelent to use on full dataset of shape [n_samples, len_of_sample]
-            # len(x.shape) >= 2:
-            print('currently implemented for 1D arrays only')
-            raise NotImplemented
+        x = x.reshape(*axes, x.shape[-1] // window_size, window_size)
 
         return x
 
@@ -201,6 +213,7 @@ class DerivativeEvent(EventDetector):
 
 
 class ROI:
+
     def __init__(self, detectors: Union[EventDetector, list[EventDetector]]):
         if not isinstance(detectors, Iterable):
             detectors = [detectors]
