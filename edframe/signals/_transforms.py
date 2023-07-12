@@ -9,6 +9,9 @@ from statsmodels.tsa.ar_model import AutoReg
 import numpy as np
 
 
+def identity(x:np.ndarray):
+    return x
+
 def downsample(x: np.ndarray, n_samples: int) -> np.ndarray:
     if n_samples > x.shape[-1]:
         raise ValueError
