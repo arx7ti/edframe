@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+from typing import Optional, Callable, Iterable
 from sklearn.cluster import AgglomerativeClustering
-from typing import Optional, Union, Any, Callable, Iterable
+from beartype import abby
 
 import numpy as np
 import itertools as it
@@ -10,7 +11,6 @@ from ..data.entities import PowerSample, DataSet
 
 
 class EventDetector:
-    __window__: Callable | None = None
     __low__: bool = False
     __high__: bool = False
     __continuous__: bool = False
@@ -37,153 +37,182 @@ class EventDetector:
 
         return True
 
-    def __init__(self, verbose_name: Optional[str] = None) -> None:
-        if not self.__low__ and not self.__high__:
+    def __init__(
+        self,
+        window: Callable,
+        window_size: int,
+        drop_last: bool = True,
+        verbose_name: Optional[str] = None,
+    ) -> None:
+        if not isinstance(window, Callable):
             raise ValueError
 
-        if self.__window__ is None:
+        if not self.__low__ and not self.__high__:
             raise ValueError
 
         if verbose_name is not None:
             self.__verbose_name__ = verbose_name
 
-    def __call__(self, x: np.ndarray) -> list[tuple[str, int, Any]]:
+        self._window = window
+        self._window_size = window_size
+        self._drop_last = drop_last
+
+    def __call__(self, x: PowerSample | DataSet | np.ndarray):
         return self.detect(x)
 
-    def _striding_window_view(self, x, window_size, drop_last: bool = True):
+    def _striding_window_view(self, x: np.ndarray) -> np.ndarray:
         n = x.shape[-1]
         axes = x.shape[:-1]
-        rem = n % window_size
+        rem = n % self._window_size
 
         if rem > 0:
-            if drop_last:
+            if self._drop_last:
                 # In case of dropping last not-full window:
                 x = x[..., :n - rem]
             else:
                 # In case of padding last not-full window:
-                n_pad = window_size - (n % window_size)
+                n_pad = self._window_size - (n % self._window_size)
 
                 if n_pad > 0:
                     # Padding with zeros
                     x_pad = np.zeros((*axes, n_pad), dtype=x.dtype)
                     x = np.concatenate((x, x_pad), axis=-1)
 
-        x = x.reshape(*axes, x.shape[-1] // window_size, window_size)
+        n = x.shape[-1] // self._window_size
+        x = x.reshape(*axes, n, self._window_size)
 
         return x
 
-    def detect(self, x):
+    def _detect_from_dataset(self, x: DataSet, **kwargs):
+        v = []
+        for _x in x:
+            v.append(self.detect(_x, **kwargs))
+        return v
+
+    def detect(self, x: PowerSample | DataSet | np.ndarray):
         raise NotImplementedError
+
+    def check_fn(self, x, **kwargs):
+        return None
 
 
 class ThresholdEvent(EventDetector):
+    __low__ = True
+    __high__ = True
     __continuous__ = False
 
-    def __init__(self,
-                 alpha: float = 0.05,
-                 objective_fn: str = None,
-                 above: bool = True,
-                 verbose_name: Optional[str] = None,
-                 window_size: int = 80,
-                 drop_last: bool = True) -> None:
-        super().__init__(verbose_name=verbose_name)
+    def __init__(
+        self,
+        window: Callable,
+        alpha: float = 0.05,
+        above: bool = True,
+        window_size: int = 80,
+        drop_last: bool = True,
+        verbose_name: Optional[str] = None,
+    ) -> None:
+        super().__init__(window=window,
+                         window_size=window_size,
+                         drop_last=drop_last,
+                         verbose_name=verbose_name)
         self._alpha = alpha
         self._window_size = window_size
         self._drop_last = drop_last
-
-        if objective_fn is None:
-            self._objective_fn = self.defaults['objective_fn']
-        else:
-            self._objective_fn = objective_fn
-
         self._above = above
 
-    # @property
-    # def verbose_name(self):
-    #     if self._verbose_name is None:
-    #         return "%s threshold of %s" % ("Above" if self._above else "Below",
-    #                                        self._objective_fn.__name__)
-    #     else:
-    #         return self._verbose_name
+    def detect(self, x: PowerSample | DataSet | np.ndarray, **kwargs):
+        if isinstance(x, PowerSample | DataSet):
+            x = x.values
+        elif not isinstance(x, np.ndarray):
+            raise ValueError
 
-    def detect(self, x):
+        if abby.is_bearable(x, list[PowerSample]):
+            return self._detect_from_dataset(x, **kwargs)
 
-        #################
-        x = self._striding_window_view(x, self._window_size, self._drop_last)
-        #################
+        is_dataset = kwargs.pop("is_dataset", len(x.shape) > 1)
 
-        y = np.apply_along_axis(self._objective_fn, axis=1, arr=x)
-        f = (y > self._alpha).astype(int)
-        df = np.diff(f, prepend=False)
-        signs = np.sign(df)
+        if not isinstance(x, np.ndarray):
+            raise ValueError
+
+        if len(x.shape) > 1:
+            raise ValueError("Only 1D signals are supported")
+
+        self.check_fn(x, is_dataset=is_dataset, **kwargs)
+
+        n = len(x)
+        x = self._striding_window_view(x)
+        x = np.apply_along_axis(self._window, axis=1, arr=x)
+        dx = np.diff(x > self._alpha, prepend=False)
+        signs = np.sign(dx)
         locs0 = np.argwhere(signs > 0).ravel()
         locs1 = np.argwhere(signs < 0).ravel()
-        locs1 -= 1
-        locs = np.sort(np.concatenate((locs0, locs1)))
+        # locs1 -= 1
+        # locs = np.sort(np.concatenate((locs0, locs1)))
+        locs = np.concatenate((locs0, locs1))
         # locs1[signs[locs] < 0] -= 1
 
         # Calibration
-        if len(locs) % 2 != 0:
-            locs = np.append(locs, len(x) - 1)
+        if len(locs) % 2 > 0:
+            locs = np.append(locs, n)
 
         signs = signs[locs]
         signs = np.where(signs < 0, 0, 1)
-
+        locs *= self._window_size
+        locs[len(locs0):] -= 1
         events = list(zip(locs, signs))
 
         return events
 
 
 class DerivativeEvent(EventDetector):
+    __high__ = True
     __continuous__ = True
 
     def __init__(
         self,
+        window: Callable,
         alpha: float = 0.05,
         beta: int = 10,
         interia: bool = True,
         relative: bool = True,
-        objective_fn: str = None,
-        verbose_name: Optional[str] = None,
         window_size: int = 80,
         drop_last: bool = True,
+        verbose_name: Optional[str] = None,
     ) -> None:
-        super().__init__(verbose_name=verbose_name)
+        super().__init__(window=window,
+                         window_size=window_size,
+                         drop_last=drop_last,
+                         verbose_name=verbose_name)
         self._alpha = alpha
         self._beta = beta
         self._interia = interia
         self._relative = relative
-        self._window_size = window_size
-        self._drop_last = drop_last
 
-        if objective_fn is None:
-            self._objective_fn = self.defaults['objective_fn']
-        else:
-            self._objective_fn = objective_fn
+    def detect(self, x: np.ndarray, **kwargs):
+        if isinstance(x, PowerSample | DataSet):
+            x = x.values
+        elif not isinstance(x, np.ndarray):
+            raise ValueError
 
-    @property
-    def verbose_name(self):
-        return "Derivative of %s" % self._objective_fn.__name__
+        if abby.is_bearable(x, list[PowerSample]):
+            return self._detect_from_dataset(x, **kwargs)
 
-    def detect(self, x: np.ndarray) -> list[tuple[int, int]]:
-        # TODO Ivan :: striding window
-        # Now x -> 1d
-        # need to split x into windows
-        # IMPORTANT ASSUMPTION: drop last window
-        # CODE HERE
+        is_dataset = kwargs.pop("is_dataset", len(x.shape) > 1)
 
-        ######################
-        x = self._striding_window_view(x, self._window_size, self._drop_last)
-        ######################
+        if not isinstance(x, np.ndarray):
+            raise ValueError
 
-        y = np.apply_along_axis(self._objective_fn, axis=1, arr=x)
-        dy = np.diff(y, prepend=np.NINF)
+        self.check_fn(x, is_dataset=is_dataset, **kwargs)
+
+        x = self._striding_window_view(x)
+        x = np.apply_along_axis(self._window, axis=1, arr=x)
+        dx = np.diff(x, prepend=np.NINF)
 
         if self._relative:
-            dy[1:] /= y[:-1]
+            dx[1:] /= x[:-1]
 
-        f = np.abs(dy) > self._alpha
-        locs = np.argwhere(f).ravel()
+        print(">>>", dx)
+
+        locs = np.argwhere(np.abs(dx) > self._alpha).ravel()
 
         if len(locs) > 1 and self._interia:
             locs_upd = []
@@ -198,65 +227,79 @@ class DerivativeEvent(EventDetector):
             locs = np.sort(locs_upd)
 
         # Calibration
+        # print(locs[-1])
+        # 10*80
+        # 9 *
+        print("B", locs)
         if locs[-1] < len(x) - 1:
             locs = np.append(locs, len(x) - 1)
-        assert locs[-1] < len(x)
+        print("A", locs)
 
         # Signs
-        signs = np.sign(dy[locs])
+        signs = np.sign(dx[locs])
         signs = np.where(signs < 0, 0, 1)
+        locs *= self._window_size
+        locs[1:] -= 1
+        print(locs)
+        assert locs[-1] < len(x) * self._window_size
 
         # Events
-        events = list(zip(locs * self._window_size, signs))
+        events = list(zip(locs, signs))
 
         return events
 
 
 class ROI:
 
-    def __init__(self, detectors: Union[EventDetector, list[EventDetector]]):
-        if not isinstance(detectors, Iterable):
+    def __init__(self, detectors: EventDetector | Iterable["EventDetector"]):
+        if isinstance(detectors, EventDetector):
             detectors = [detectors]
+        elif not isinstance(detectors, Iterable):
+            raise ValueError
 
         self._detectors = detectors
+        self._k = 0
 
-    def __call__(
+    def __call__(self, x) -> PowerSample | DataSet | np.ndarray:
+        x = self.crop(x)
+        return x
+
+    def crop(
         self,
-        x: Union[PowerSample, np.ndarray],
-    ) -> Union[PowerSample, np.ndarray]:
-        return self._get(x, self._detectors)
+        x: PowerSample | DataSet | np.ndarray,
+    ) -> PowerSample | DataSet | np.ndarray:
 
-    def _get(
-        self,
-        x: Union[PowerSample, np.ndarray],
-        detectors: list[EventDetector],
-    ) -> list[Union[PowerSample, np.ndarray]]:
-        detector0 = detectors[0]
-        events0 = detector0(x)
-        locs0, _ = zip(*events0)
+        def _crop(x: PowerSample | DataSet | np.ndarray, detectors):
+            detector0 = detectors[0]
+            events0 = detector0(x)
+            locs0, _ = zip(*events0)
 
-        if detector0.is_continuous():
-            locs2d0 = []
-            for i in range(1, len(locs0)):
-                a = locs0[i - 1]
-                if i == len(locs0) - 1:
-                    b = locs0[i]
-                else:
-                    b = locs0[i] - 1
-                locs2d0.append([a, b])
-        else:
-            locs2d0 = [locs0[i:i + 2] for i in range(0, len(locs0), 2)]
+            if detector0.is_continuous():
+                locs2d0 = []
+                for i in range(1, len(locs0)):
+                    a = locs0[i - 1]
 
-        del locs0
-
-        roi = []
-
-        for a0, b0 in locs2d0:
-            xab0 = x[a0:b0 + 1]
-
-            if len(detectors) > 1 and len(xab0) > 1:
-                roi.extend(self._get(xab0, detectors[1:]))
+                    if i == len(locs0) - 1:
+                        b = locs0[i]
+                    else:
+                        b = locs0[i] - 1
+                    locs2d0.append([a, b])
             else:
-                roi.append(xab0)
+                locs2d0 = [locs0[i:i + 2] for i in range(0, len(locs0), 2)]
 
-        return roi
+            del locs0
+
+            roi = []
+
+            for a0, b0 in locs2d0:
+                print(a0, b0)
+                xab0 = x[a0:b0 + 1]
+
+                if len(detectors) > 1 and len(xab0) > 1:
+                    roi.extend(_crop(xab0, detectors[1:]))
+                else:
+                    roi.append(xab0)
+
+            return roi
+
+        return _crop(x, self._detectors)
