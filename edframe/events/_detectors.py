@@ -41,7 +41,6 @@ class EventDetector:
         self,
         window: Callable,
         window_size: int,
-        drop_last: bool = True,
         verbose_name: Optional[str] = None,
     ) -> None:
         if not isinstance(window, Callable):
@@ -55,31 +54,21 @@ class EventDetector:
 
         self._window = window
         self._window_size = window_size
-        self._drop_last = drop_last
 
     def __call__(self, x: PowerSample | DataSet | np.ndarray):
         return self.detect(x)
 
     def _striding_window_view(self, x: np.ndarray) -> np.ndarray:
-        n = x.shape[-1]
         axes = x.shape[:-1]
-        rem = n % self._window_size
+        n_pad = self._window_size - (x.shape[-1] % self._window_size)
 
-        if rem > 0:
-            if self._drop_last:
-                # In case of dropping last not-full window:
-                x = x[..., :n - rem]
-            else:
-                # In case of padding last not-full window:
-                n_pad = self._window_size - (n % self._window_size)
+        if n_pad > 0:
+            # Padding with zeros
+            x_pad = np.zeros((*axes, n_pad), dtype=x.dtype)
+            x = np.concatenate((x, x_pad), axis=-1)
 
-                if n_pad > 0:
-                    # Padding with zeros
-                    x_pad = np.zeros((*axes, n_pad), dtype=x.dtype)
-                    x = np.concatenate((x, x_pad), axis=-1)
-
-        n = x.shape[-1] // self._window_size
-        x = x.reshape(*axes, n, self._window_size)
+        n_windows = x.shape[-1] // self._window_size
+        x = x.reshape(*axes, n_windows, self._window_size)
 
         return x
 
@@ -107,16 +96,13 @@ class ThresholdEvent(EventDetector):
         alpha: float = 0.05,
         above: bool = True,
         window_size: int = 80,
-        drop_last: bool = True,
         verbose_name: Optional[str] = None,
     ) -> None:
         super().__init__(window=window,
                          window_size=window_size,
-                         drop_last=drop_last,
                          verbose_name=verbose_name)
         self._alpha = alpha
         self._window_size = window_size
-        self._drop_last = drop_last
         self._above = above
 
     def detect(self, x: PowerSample | DataSet | np.ndarray, **kwargs):
@@ -141,7 +127,7 @@ class ThresholdEvent(EventDetector):
         n = len(x)
         x = self._striding_window_view(x)
         x = np.apply_along_axis(self._window, axis=1, arr=x)
-        dx = np.diff(x > self._alpha, prepend=False)
+        dx = np.diff(x > self._alpha, prepend=False).astype(int)
         signs = np.sign(dx)
         locs0 = np.argwhere(signs > 0).ravel()
         locs1 = np.argwhere(signs < 0).ravel()
@@ -175,12 +161,10 @@ class DerivativeEvent(EventDetector):
         interia: bool = True,
         relative: bool = True,
         window_size: int = 80,
-        drop_last: bool = True,
         verbose_name: Optional[str] = None,
     ) -> None:
         super().__init__(window=window,
                          window_size=window_size,
-                         drop_last=drop_last,
                          verbose_name=verbose_name)
         self._alpha = alpha
         self._beta = beta
@@ -210,8 +194,6 @@ class DerivativeEvent(EventDetector):
         if self._relative:
             dx[1:] /= x[:-1]
 
-        print(">>>", dx)
-
         locs = np.argwhere(np.abs(dx) > self._alpha).ravel()
 
         if len(locs) > 1 and self._interia:
@@ -227,19 +209,13 @@ class DerivativeEvent(EventDetector):
             locs = np.sort(locs_upd)
 
         # Calibration
-        # print(locs[-1])
-        # 10*80
-        # 9 *
-        print("B", locs)
         if locs[-1] < len(x) - 1:
             locs = np.append(locs, len(x) - 1)
-        print("A", locs)
 
         # Signs
         signs = np.sign(dx[locs])
         signs = np.where(signs < 0, 0, 1)
         locs *= self._window_size
-        locs[1:] -= 1
         print(locs)
         assert locs[-1] < len(x) * self._window_size
 
@@ -250,7 +226,6 @@ class DerivativeEvent(EventDetector):
 
 
 class ROI:
-
     def __init__(self, detectors: EventDetector | Iterable["EventDetector"]):
         if isinstance(detectors, EventDetector):
             detectors = [detectors]
@@ -268,8 +243,9 @@ class ROI:
         self,
         x: PowerSample | DataSet | np.ndarray,
     ) -> PowerSample | DataSet | np.ndarray:
+        n = len(x)
 
-        def _crop(x: PowerSample | DataSet | np.ndarray, detectors):
+        def _crop(x: np.ndarray, detectors):
             detector0 = detectors[0]
             events0 = detector0(x)
             locs0, _ = zip(*events0)
@@ -278,12 +254,16 @@ class ROI:
                 locs2d0 = []
                 for i in range(1, len(locs0)):
                     a = locs0[i - 1]
+                    b = locs0[i]
 
-                    if i == len(locs0) - 1:
-                        b = locs0[i]
-                    else:
-                        b = locs0[i] - 1
-                    locs2d0.append([a, b])
+                    # if i == len(locs0) - 1:
+                    #     b = locs0[i]
+                    # else:
+                    #     b = locs0[i] - 1
+                    locs2d0.append((a, b))
+
+                # if b < n:
+                #     locs2d0.append((b, n))
             else:
                 locs2d0 = [locs0[i:i + 2] for i in range(0, len(locs0), 2)]
 
@@ -292,8 +272,8 @@ class ROI:
             roi = []
 
             for a0, b0 in locs2d0:
-                print(a0, b0)
-                xab0 = x[a0:b0 + 1]
+                print("-> %s" % detector0._window, a0, b0)
+                xab0 = x[a0:b0]
 
                 if len(detectors) > 1 and len(xab0) > 1:
                     roi.extend(_crop(xab0, detectors[1:]))
