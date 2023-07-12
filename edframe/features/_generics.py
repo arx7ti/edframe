@@ -90,6 +90,28 @@ class Feature:
         *args,
         **kwargs,
     ) -> Union[int, float, str, np.ndarray]:
+        return self.extract(x, *args, **kwargs)
+
+    def __str__(self) -> str:
+        return self.__class__.__name__
+
+    def __repr__(self) -> str:
+        return str(self)
+
+    def _extract_from_dataset(self, x, *args, **kwargs):
+        values = []
+
+        for sample in x:
+            values.append(self.extract(sample, *args, **kwargs))
+
+        return values
+
+    def extract(
+        self,
+        x: PowerSample | DataSet | np.ndarray,
+        *args,
+        **kwargs,
+    ) -> Union[int, float, str, np.ndarray]:
         if isinstance(x, PowerSample | DataSet):
             x = x.values
         elif not isinstance(x, np.ndarray):
@@ -98,12 +120,12 @@ class Feature:
         if abby.is_bearable(x, list[PowerSample]):
             return self._extract_from_dataset(x, *args, **kwargs)
 
-        is_dataset = kwargs.get("is_dataset", len(x.shape) > 1)
+        is_dataset = kwargs.pop("is_dataset", len(x.shape) > 1)
 
         if not isinstance(x, np.ndarray):
             raise ValueError
 
-        self.check_fn(x, *args, **kwargs)
+        self.check_fn(x, *args, is_dataset=is_dataset, **kwargs)
 
         if self.is_estimator():
             # TODO check if fitted estimator called over single sample
@@ -148,20 +170,6 @@ class Feature:
             raise ValueError
 
         return x
-
-    def __str__(self) -> str:
-        return self.__class__.__name__
-
-    def __repr__(self) -> str:
-        return str(self)
-
-    def _extract_from_dataset(self, x, *args, **kwargs):
-        values = []
-
-        for sample in x:
-            values.append(self(sample, *args, **kwargs))
-
-        return values
 
     def is_numerical(self):
         return self.__numerical__
