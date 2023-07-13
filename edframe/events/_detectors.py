@@ -216,9 +216,7 @@ class DerivativeEvent(EventDetector):
         signs = np.sign(dx[locs])
         signs = np.where(signs < 0, 0, 1)
         locs *= self._window_size
-        print(locs)
         assert locs[-1] < len(x) * self._window_size
-
         # Events
         events = list(zip(locs, signs))
 
@@ -226,6 +224,7 @@ class DerivativeEvent(EventDetector):
 
 
 class ROI:
+
     def __init__(self, detectors: EventDetector | Iterable["EventDetector"]):
         if isinstance(detectors, EventDetector):
             detectors = [detectors]
@@ -243,7 +242,6 @@ class ROI:
         self,
         x: PowerSample | DataSet | np.ndarray,
     ) -> PowerSample | DataSet | np.ndarray:
-        n = len(x)
 
         def _crop(x: np.ndarray, detectors):
             detector0 = detectors[0]
@@ -252,18 +250,11 @@ class ROI:
 
             if detector0.is_continuous():
                 locs2d0 = []
+
                 for i in range(1, len(locs0)):
                     a = locs0[i - 1]
                     b = locs0[i]
-
-                    # if i == len(locs0) - 1:
-                    #     b = locs0[i]
-                    # else:
-                    #     b = locs0[i] - 1
                     locs2d0.append((a, b))
-
-                # if b < n:
-                #     locs2d0.append((b, n))
             else:
                 locs2d0 = [locs0[i:i + 2] for i in range(0, len(locs0), 2)]
 
@@ -272,7 +263,6 @@ class ROI:
             roi = []
 
             for a0, b0 in locs2d0:
-                print("-> %s" % detector0._window, a0, b0)
                 xab0 = x[a0:b0]
 
                 if len(detectors) > 1 and len(xab0) > 1:
