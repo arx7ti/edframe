@@ -297,36 +297,6 @@ class BackrefDataFrame(Backref):
     def count(self):
         return len(self.names)
 
-    def get(
-        self,
-        fns: Callable | Iterable[Callable],
-        # source: str = None,  # FIXME remove attr, add sample method instead
-    ) -> BackrefDataFrame:
-        self._check_callables(fns)
-
-        columns = []
-        values = []
-
-        for fn in fns:
-            tmp = fn(self.backref)
-            col = fn.verbose_name
-
-            # TODO this is for class Features only. Todo if called from class Events
-            if fn.is_vector():
-                columns.extend([f"{col}{i}" for i in range(fn.size)])
-            else:
-                columns.append(col)
-
-            for _ in range(2 - len(tmp.shape)):
-                tmp = tmp[None]
-
-            values.append(tmp)
-
-        values = np.concatenate(values, axis=1)
-        df = pd.DataFrame(values, columns=columns)
-
-        return self.update(data=df, _extractors=list(fns))
-
     def pop(self, name: str) -> pd.Series:
         item = self.data.pop(name)
         idx = self.names.index(name)
@@ -363,6 +333,12 @@ class Events(BackrefDataFrame):
     def data(self, data):
         self._data = data
 
+    def __call__(self, *args, **kwargs) -> BackrefDataFrame:
+        return self.detect(*args, **kwargs)
+
+    def detect(self, *args, **kwargs) -> BackrefDataFrame:
+        pass
+
     def to_features(self) -> Features:
         pass
 
@@ -380,6 +356,9 @@ class Features(BackrefDataFrame):
         else:
             raise ValueError
 
+    def __call__(self, fns: Callable | Iterable[Callable]) -> BackrefDataFrame:
+        return self.extract(fns)
+
     def add(self, features: Union[Events, Features]) -> Features:
         # TODO events
         # TODO categorical
@@ -396,6 +375,36 @@ class Features(BackrefDataFrame):
             raise ValueError
 
         return self.update(data=values)
+
+    def extract(
+        self,
+        fns: Callable | Iterable[Callable],
+        # source: str = None,  # FIXME remove attr, add sample method instead
+    ) -> BackrefDataFrame:
+        self._check_callables(fns)
+
+        columns = []
+        values = []
+
+        for fn in fns:
+            tmp = fn(self.backref)
+            col = fn.verbose_name
+
+            # TODO this is for class Features only. Todo if called from class Events
+            if fn.is_vector():
+                columns.extend([f"{col}{i}" for i in range(fn.size)])
+            else:
+                columns.append(col)
+
+            for _ in range(2 - len(tmp.shape)):
+                tmp = tmp[None]
+
+            values.append(tmp)
+
+        values = np.concatenate(values, axis=1)
+        df = pd.DataFrame(values, columns=columns)
+
+        return self.update(data=df, _extractors=list(fns))
 
 
 class Components(Backref):
@@ -521,9 +530,6 @@ class Components(Backref):
             values.append(f(v, *args, **kwargs))
         return values
 
-    # def crop(self, a, b):
-    #     return self.transform(crop, a, b)
-
     def sum(self, rule: str = "+"):
         if rule == "+":
             values = np.sum(self.values, axis=0)
@@ -566,9 +572,11 @@ class GenericState:
 class PowerSample(Generic):
     # TODO about named vars, v,i, p etc. to be used further e.g. from Features
 
-    events = Events
-    features = Features
-    components = Components
+    events: Events = Events
+    features: Features = Features
+    components: Components = Components
+    __low__: bool = False  # TODO add check
+    __high__: bool = False
 
     class Meta:
         values_attr = None
@@ -756,19 +764,19 @@ class PowerSample(Generic):
     # TODO 3. if labels
     # TODO 4. if labels and components
 
-    @property
-    def appliances(self):
-        return self._appliances
-
     @State.check
-    def __getitem__(self, locs):
+    def __getitem__(self, locs: slice):
+        if not isinstance(locs, slice):
+            raise ValueError
+
         data = self.data[locs]
         # TODO
-        # ps._data = ps._data[locs]
         if self.components.count() > 0:
             components = self.components[:, locs]
         if self.locs is not None:
-            locs = np.clips(self.locs, a_min=locs[:, 0], a_max=locs[:, 1])
+            a = 0 if locs.start is None else locs.start
+            b = len(data) - a if locs.stop is None else locs.stop
+            locs = np.clips(self.locs, a_min=a, a_max=b - 1)
             # TODO locs?
         return self.update(data=data, _locs=locs, _components=components)
 
@@ -804,8 +812,15 @@ class PowerSample(Generic):
         # TODO check setters in inherited classes
         return setattr(self, self.Meta.values_attr, values)
 
+    def crop(self, a=None, b=None, roi=None) -> list[PowerSample]:
+        if a is not None and b is not None:
+            return self[a:b]
+        elif roi is not None:
+            return roi.crop(self)
+
 
 class VISample(PowerSample):
+    __high__ = True
 
     class Meta:
         values_attr = "i"

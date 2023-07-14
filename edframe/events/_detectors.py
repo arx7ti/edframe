@@ -5,7 +5,6 @@ from sklearn.cluster import AgglomerativeClustering
 from beartype import abby
 
 import numpy as np
-import itertools as it
 
 from ..data.entities import PowerSample, DataSet
 
@@ -31,9 +30,10 @@ class EventDetector:
             and not (hasattr(obj, "__high__") or isinstance(obj, np.ndarray)):
             return False
 
-        if not (self.__low__ == obj.__low__ == True
-                or self.__high__ == obj.__high__ == True):
-            return False
+        if not isinstance(obj, np.ndarray):
+            if not (self.__low__ == obj.__low__ == True
+                    or self.__high__ == obj.__high__ == True):
+                return False
 
         return True
 
@@ -78,6 +78,13 @@ class EventDetector:
             v.append(self.detect(_x, **kwargs))
         return v
 
+    def _check_compatibility(
+        self,
+        x: PowerSample | DataSet | np.ndarray,
+    ) -> None:
+        if not self.is_compatible(x):
+            raise ValueError
+
     def detect(self, x: PowerSample | DataSet | np.ndarray):
         raise NotImplementedError
 
@@ -106,6 +113,8 @@ class ThresholdEvent(EventDetector):
         self._above = above
 
     def detect(self, x: PowerSample | DataSet | np.ndarray, **kwargs):
+        self._check_compatibility(x)
+
         if isinstance(x, PowerSample | DataSet):
             x = x.values
         elif not isinstance(x, np.ndarray):
@@ -131,10 +140,7 @@ class ThresholdEvent(EventDetector):
         signs = np.sign(dx)
         locs0 = np.argwhere(signs > 0).ravel()
         locs1 = np.argwhere(signs < 0).ravel()
-        # locs1 -= 1
-        # locs = np.sort(np.concatenate((locs0, locs1)))
         locs = np.concatenate((locs0, locs1))
-        # locs1[signs[locs] < 0] -= 1
 
         # Calibration
         if len(locs) % 2 > 0:
@@ -172,6 +178,8 @@ class DerivativeEvent(EventDetector):
         self._relative = relative
 
     def detect(self, x: np.ndarray, **kwargs):
+        self._check_compatibility(x)
+
         if isinstance(x, PowerSample | DataSet):
             x = x.values
         elif not isinstance(x, np.ndarray):
