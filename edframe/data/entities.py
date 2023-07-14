@@ -7,6 +7,7 @@ import pandas as pd
 
 from beartype import abby
 from copy import deepcopy
+from collections import defaultdict
 from beartype.typing import Iterable
 from typing import Optional, Callable, Union, Any, Iterable
 
@@ -148,7 +149,6 @@ class Backref(Generic):
 
 
 class AttributeExtractors(Backref):
-
     @property
     def values(self):
         values = [getattr(self, n) for n in self.names]
@@ -323,8 +323,8 @@ class BackrefDataFrame(Backref):
     #     return self.data
 
 
-class Events(BackrefDataFrame):
-
+# TODO not DataFrame, but dict[timestamp, list[event.verbose_name]]
+class Events(Backref):
     @property
     def data(self) -> pd.DataFrame:
         return self._data
@@ -333,33 +333,40 @@ class Events(BackrefDataFrame):
     def data(self, data):
         self._data = data
 
+    @property
+    def extractors(self):
+        return AttributeExtractors(self, data=self._extractors)
+
     def __call__(self, *args, **kwargs) -> BackrefDataFrame:
         return self.detect(*args, **kwargs)
+
+    def __after__(self, *args, **kwargs):
+        self._extractors = []
 
     def detect(
         self,
         fns: Callable | Iterable[Callable],
         source_name: Optional[str] = None,
     ) -> BackrefDataFrame:
-        self._check_callables(fns)
+        # self._check_callables(fns)
 
-        columns = []
-        values = []
+        data = defaultdict(list)
 
         for fn in fns:
             if source_name is not None:
                 fn.source_name = source_name
 
-            tmp = fn(self.backref)
-            col = fn.verbose_name
-            # TODO continue
+            events = fn(self.backref)
 
-        # df = pd.DataFrame(values, columns=columns)
+            for loc, sign in events:
+                data[loc].append((fn.verbose_name, sign))
 
-        # return self.update(data=df, _extractors=list(fns))
+        data = dict(data)
+
+        return self.update(data=data, _extractors=list(fns))
 
     def to_features(self) -> Features:
-        pass
+        raise NotImplementedError
 
 
 class Features(BackrefDataFrame):
@@ -563,7 +570,6 @@ class LockedError(Exception):
 
 
 class GenericState:
-
     def __init__(self) -> None:
         self._locked = False
         self._msg = ""
@@ -599,10 +605,8 @@ class PowerSample(Generic):
     __high__: bool = False
 
     class State(GenericState):
-
         @classmethod
         def check(cls, method: Callable):
-
             def wrapper(self, *args, **kwargs):
                 if not issubclass(self.__class__, PowerSample):
                     raise ValueError("Argument \"self\" is required")
@@ -627,7 +631,6 @@ class PowerSample(Generic):
 
         @classmethod
         def check_init_args(cls, method):
-
             def wrapper(*args, **kwargs):
                 labels = kwargs.get("labels", None)
                 appliances = kwargs.get("appliances", None)
