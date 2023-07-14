@@ -22,6 +22,14 @@ class EventDetector:
         else:
             return self.__verbose_name__
 
+    @property
+    def source_name(self) -> str:
+        return self._source_name
+
+    @source_name.setter
+    def source_name(self, source_name: str) -> None:
+        self._source_name = source_name
+
     def is_continuous(self):
         return self.__continuous__
 
@@ -100,7 +108,7 @@ class ThresholdEvent(EventDetector):
     def __init__(
         self,
         window: Callable,
-        alpha: float = 0.05,
+        alpha: float = 0.005,
         above: bool = True,
         window_size: int = 80,
         verbose_name: Optional[str] = None,
@@ -183,7 +191,7 @@ class DerivativeEvent(EventDetector):
         self._check_compatibility(x)
 
         if isinstance(x, PowerSample | DataSet):
-            x = x.source(self._source_name)
+            x = x.source(self.source_name)
         elif not isinstance(x, np.ndarray):
             raise ValueError
 

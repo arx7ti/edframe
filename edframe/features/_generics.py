@@ -40,6 +40,14 @@ class Feature:
 
         return name
 
+    @property
+    def source_name(self) -> str:
+        return self._source_name
+
+    @source_name.setter
+    def source_name(self, source_name: str) -> None:
+        self._source_name = source_name
+
     @classmethod
     def _to_array(cls, x: Any) -> np.ndarray:
         if isinstance(x, np.ndarray):
@@ -114,7 +122,7 @@ class Feature:
         **kwargs,
     ) -> Union[int, float, str, np.ndarray]:
         if isinstance(x, PowerSample | DataSet):
-            x = x.source(self._source_name)
+            x = x.source(self.source_name)
         elif not isinstance(x, np.ndarray):
             raise ValueError
 
