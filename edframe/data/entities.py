@@ -336,8 +336,27 @@ class Events(BackrefDataFrame):
     def __call__(self, *args, **kwargs) -> BackrefDataFrame:
         return self.detect(*args, **kwargs)
 
-    def detect(self, *args, **kwargs) -> BackrefDataFrame:
-        pass
+    def detect(
+        self,
+        fns: Callable | Iterable[Callable],
+        source_name: Optional[str] = None,
+    ) -> BackrefDataFrame:
+        self._check_callables(fns)
+
+        columns = []
+        values = []
+
+        for fn in fns:
+            if source_name is not None:
+                fn.source_name = source_name
+
+            tmp = fn(self.backref)
+            col = fn.verbose_name
+            # TODO continue
+
+        # df = pd.DataFrame(values, columns=columns)
+
+        # return self.update(data=df, _extractors=list(fns))
 
     def to_features(self) -> Features:
         pass
@@ -345,6 +364,7 @@ class Events(BackrefDataFrame):
 
 class Features(BackrefDataFrame):
 
+    # TODO onchange
     @property
     def data(self) -> pd.DataFrame:
         return self._data
@@ -360,9 +380,6 @@ class Features(BackrefDataFrame):
         return self.extract(fns)
 
     def add(self, features: Union[Events, Features]) -> Features:
-        # TODO events
-        # TODO categorical
-        # TODO onchange
 
         if self.backref == features.backref:
             if isinstance(features, Events):
@@ -379,8 +396,7 @@ class Features(BackrefDataFrame):
     def extract(
         self,
         fns: Callable | Iterable[Callable],
-        # FIXME remove attr, add sample method instead
-        source: Optional[str | np.ndarray] = None,
+        source_name: Optional[str] = None,
     ) -> BackrefDataFrame:
         self._check_callables(fns)
 
@@ -388,10 +404,12 @@ class Features(BackrefDataFrame):
         values = []
 
         for fn in fns:
+            if source_name is not None:
+                fn.source_name = source_name
+
             tmp = fn(self.backref)
             col = fn.verbose_name
 
-            # TODO this is for class Features only. Todo if called from class Events
             if fn.is_vector():
                 columns.extend([f"{col}{i}" for i in range(fn.size)])
             else:
