@@ -168,6 +168,7 @@ class DerivativeEvent(EventDetector):
         relative: bool = True,
         window_size: int = 80,
         verbose_name: Optional[str] = None,
+        source_name: Optional[str] = None,
     ) -> None:
         super().__init__(window=window,
                          window_size=window_size,
@@ -176,12 +177,13 @@ class DerivativeEvent(EventDetector):
         self._beta = beta
         self._interia = interia
         self._relative = relative
+        self._source_name = "values" if source_name is None else source_name
 
     def detect(self, x: np.ndarray, **kwargs):
         self._check_compatibility(x)
 
         if isinstance(x, PowerSample | DataSet):
-            x = x.values
+            x = x.source(self._source_name)
         elif not isinstance(x, np.ndarray):
             raise ValueError
 

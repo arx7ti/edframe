@@ -379,7 +379,8 @@ class Features(BackrefDataFrame):
     def extract(
         self,
         fns: Callable | Iterable[Callable],
-        # source: str = None,  # FIXME remove attr, add sample method instead
+        # FIXME remove attr, add sample method instead
+        source: Optional[str | np.ndarray] = None,
     ) -> BackrefDataFrame:
         self._check_callables(fns)
 
@@ -492,7 +493,7 @@ class Components(Backref):
     ) -> Components:
         if self.is_allowed_transform():
             if isinstance(fs, Callable):
-                values = np.apply_along_axis(fs, axis=0, arr=self.data)
+                data = np.apply_along_axis(fs, axis=0, arr=self.data)
             elif abby.is_bearable(
                     fs, Iterable[Callable | tuple[int, Callable] | None]):
                 if abby.is_bearable(fs, Iterable[Callable | None]):
@@ -502,22 +503,23 @@ class Components(Backref):
                         raise ValueError
                 elif not abby.is_bearable(fs, Iterable[tuple[int, Callable]]):
                     raise ValueError
-                values = np.empty_like(self.data)
+
+                data = np.empty_like(self.data)
                 mask = np.ones(self.count(), dtype=bool)
+
                 for _fs in fs:
-                    if _fs is None:
-                        continue
-                    else:
+                    if _fs is not None:
                         i, f = _fs
-                        values[i] = f(self.data[i])
+                        data[i] = f(self.data[i])
                         mask[i] = False
-                values[mask] = self.data[mask]
+
+                data[mask] = self.data[mask]
             else:
                 raise ValueError
         else:
             raise AttributeError("Transformation is not allowed")
 
-        return self.update(data=values)
+        return self.update(data=data)
 
     def map(
         self,
@@ -577,9 +579,6 @@ class PowerSample(Generic):
     components: Components = Components
     __low__: bool = False  # TODO add check
     __high__: bool = False
-
-    class Meta:
-        values_attr = None
 
     class State(GenericState):
 
@@ -800,31 +799,39 @@ class PowerSample(Generic):
                 # TODO values to data
                 fn = F(fn, ("values", ), **{arg: "values"})
 
+            # TODO must return signal
             ps = fn(ps)
 
         return ps
 
+    def map(self, fns):
+        # TODO signal to custom value
+        pass
+
     @property
-    def values(self):
-        return getattr(self, self.Meta.values_attr)
+    def values(self) -> Any:
+        raise NotImplementedError
 
     @values.setter
-    def values(self, values):
-        # TODO check setters in inherited classes
-        return setattr(self, self.Meta.values_attr, values)
+    def values(self, values: Any) -> None:
+        raise NotImplementedError
+
+    def source(self, source_name: str):
+        return getattr(self, source_name)
+
+    def set_source(self, source_name: str, source_values: Any):
+        setattr(self, source_name, source_values)
 
     def crop(self, a=None, b=None, roi=None) -> list[PowerSample]:
         if a is not None and b is not None:
             return self[a:b]
-        elif roi is not None:
+
+        if roi is not None:
             return roi.crop(self)
 
 
 class VISample(PowerSample):
     __high__ = True
-
-    class Meta:
-        values_attr = "i"
 
     def __init__(
         self,
@@ -849,6 +856,10 @@ class VISample(PowerSample):
                          components=components,
                          aggregation=aggregation,
                          **kwargs)
+        self._2d = len(v.shape) == len(i.shape) == 2
+
+    def is_2d(self):
+        return self._2d
 
     @property
     def v(self):
@@ -856,8 +867,6 @@ class VISample(PowerSample):
 
     @v.setter
     def v(self, v):
-        # if v.shape != self.v.shape:
-        #     raise ValueError
         self.data[0] = v
 
     @property
@@ -866,13 +875,19 @@ class VISample(PowerSample):
 
     @i.setter
     def i(self, i):
-        # if i.shape != self.i.shape:
-        #     raise ValueError
         self.data[1] = i
 
     @property
     def s(self):
         return self.v * self.i
+
+    @property
+    def values(self):
+        return self.i
+
+    @values.setter
+    def values(self, i: np.ndarray):
+        self.i = i
 
 
 class DataSet(Generic):
@@ -924,10 +939,26 @@ class DataSet(Generic):
 
         return self.update(data=data)
 
-    def is_aligned(self):
-        lens = [len(s.values) for s in self.data]
+    def is_aligned(self, source_name: Optional[str] = None):
+        if source_name is None:
+            source_name = "values"
+
+        lens = [len(s.source(source_name)) for s in self.data]
         lens = np.asarray(lens)
+
         return all(lens[0] == lens[1:])
+
+    def source(self, source_name: str):
+        values = [s.source(source_name) for s in self.data]
+
+        if self.is_aligned(source_name=source_name):
+            values = np.asarray(values)
+
+        return values
+
+    @property
+    def values(self):
+        return self.source("values")
 
     # TODO
     # def map(self, fs):
@@ -936,12 +967,4 @@ class DataSet(Generic):
 
 
 class VIDataSet(DataSet):
-
-    @property
-    def values(self):
-        values = [s.values for s in self.data]
-
-        if self.is_aligned():
-            values = np.asarray(values)
-
-        return values
+    pass

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-from typing import Callable, Union, Self, Any
-from numbers import Number
+from typing import Optional, Callable, Union, Self, Any
 from beartype.typing import Iterable
 from sklearn.base import BaseEstimator
 from beartype import abby
@@ -66,7 +65,7 @@ class Feature:
 
         return np.asarray(xlist)
 
-    def __init__(self, **kwargs):
+    def __init__(self, source_name: Optional[str] = None, **kwargs):
         # TODO add verbose_name to kwargs
 
         if self.is_estimator() and self.is_transform():
@@ -83,6 +82,8 @@ class Feature:
 
         if self.is_vector():
             self._size = None
+
+        self._source_name = "values" if source_name is None else source_name
 
     def __call__(
         self,
@@ -113,7 +114,7 @@ class Feature:
         **kwargs,
     ) -> Union[int, float, str, np.ndarray]:
         if isinstance(x, PowerSample | DataSet):
-            x = x.values
+            x = x.source(self._source_name)
         elif not isinstance(x, np.ndarray):
             raise ValueError
 
