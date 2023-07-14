@@ -765,20 +765,21 @@ class PowerSample(Generic):
     # TODO 4. if labels and components
 
     @State.check
-    def __getitem__(self, locs: slice):
-        if not isinstance(locs, slice):
+    def __getitem__(self, ab: slice):
+        if not isinstance(ab, slice):
             raise ValueError
 
-        data = self.data[locs]
+        values = self.values[ab]
+        components = self.components
+        locs = self.locs
         # TODO
-        if self.components.count() > 0:
-            components = self.components[:, locs]
-        if self.locs is not None:
-            a = 0 if locs.start is None else locs.start
-            b = len(data) - a if locs.stop is None else locs.stop
-            locs = np.clips(self.locs, a_min=a, a_max=b - 1)
-            # TODO locs?
-        return self.update(data=data, _locs=locs, _components=components)
+        if components.count() > 0:
+            components = components[:, ab]
+        if locs is not None:
+            a = 0 if ab.start is None else ab.start
+            b = len(values) - a if ab.stop is None else ab.stop
+            locs = np.clips(locs, a_min=a, a_max=b - 1)
+        return self.update(values=values, _locs=locs, _components=components)
 
     @State.check
     def apply(

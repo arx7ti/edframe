@@ -251,7 +251,7 @@ class ROI:
         x: PowerSample | DataSet | np.ndarray,
     ) -> PowerSample | DataSet | np.ndarray:
 
-        def _crop(x: np.ndarray, detectors):
+        def _crop(x: PowerSample | np.ndarray, detectors):
             detector0 = detectors[0]
             events0 = detector0(x)
             locs0, _ = zip(*events0)
