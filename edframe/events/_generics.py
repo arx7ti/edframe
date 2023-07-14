@@ -207,12 +207,16 @@ class DerivativeEvent(EventDetector):
 
         x = self._striding_window_view(x)
         x = np.apply_along_axis(self._window, axis=1, arr=x)
+        x = np.nan_to_num(x, nan=np.Inf)
         dx = np.diff(x, prepend=np.NINF)
 
         if self._relative:
             dx[1:] /= x[:-1]
 
+        dx = np.nan_to_num(dx, nan=np.Inf)
+
         locs = np.argwhere(np.abs(dx) > self._alpha).ravel()
+        # TODO if no locs found
 
         if len(locs) > 1 and self._interia:
             locs_upd = []
@@ -242,7 +246,6 @@ class DerivativeEvent(EventDetector):
 
 
 class ROI:
-
     def __init__(self, detectors: EventDetector | Iterable["EventDetector"]):
         if isinstance(detectors, EventDetector):
             detectors = [detectors]
@@ -260,7 +263,6 @@ class ROI:
         self,
         x: PowerSample | DataSet | np.ndarray,
     ) -> PowerSample | DataSet | np.ndarray:
-
         def _crop(x: PowerSample | np.ndarray, detectors):
             detector0 = detectors[0]
             events0 = detector0(x)
