@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import torch
+# import torch
 import inspect
 import numpy as np
 import pandas as pd
@@ -9,6 +9,9 @@ from beartype import abby
 from copy import deepcopy
 from collections import defaultdict
 from beartype.typing import Iterable
+from sklearn.base import BaseEstimator
+from sklearn.utils.validation import check_is_fitted
+from sklearn.exceptions import NotFittedError
 from typing import Optional, Callable, Union, Any, Iterable
 
 from edframe.signals import F
@@ -149,6 +152,7 @@ class Backref(Generic):
 
 
 class AttributeExtractors(Backref):
+
     @property
     def values(self):
         values = [getattr(self, n) for n in self.names]
@@ -325,6 +329,7 @@ class BackrefDataFrame(Backref):
 
 # TODO not DataFrame, but dict[timestamp, list[event.verbose_name]]
 class Events(Backref):
+
     @property
     def data(self) -> pd.DataFrame:
         return self._data
@@ -369,6 +374,10 @@ class Events(Backref):
         raise NotImplementedError
 
 
+class Linkage:
+    pass
+
+
 class Features(BackrefDataFrame):
 
     # TODO onchange
@@ -400,37 +409,56 @@ class Features(BackrefDataFrame):
 
         return self.update(data=values)
 
-    def extract(
-        self,
-        fns: Callable | Iterable[Callable],
-        source_name: Optional[str] = None,
-    ) -> BackrefDataFrame:
-        self._check_callables(fns)
-
+    def extract(self, fns: Callable | Iterable[Callable]) -> BackrefDataFrame:
         columns = []
-        values = []
+        X = []
 
         for fn in fns:
-            if source_name is not None:
-                fn.source_name = source_name
-
-            tmp = fn(self.backref)
-            col = fn.verbose_name
-
-            if fn.is_vector():
-                columns.extend([f"{col}{i}" for i in range(fn.size)])
+            if isinstance(fn, Linkage):
+                x = self.backref.source(fn.source_name)
+                col = fn.verbose_name
             else:
+                x = self.backref.values
+
+                try:
+                    col = fn.__name__
+                except AttributeError:
+                    col = fn.__class__.__name__
+
+                col = col.split('.')[-1]
+
+            if not isinstance(x, np.ndarray):
+                raise ValueError
+
+            if len(x.shape) != 1:
+                raise ValueError
+
+            if isinstance(fn, BaseEstimator) or hasattr(fn, "fit")\
+                or hasattr(fn, "transform") or hasattr(fn, "fit_transform"):
+
+                try:
+                    check_is_fitted(fn)
+                except NotFittedError:
+                    raise ValueError("The feature estimator was not fitted. "
+                                     "Call this feature on a dataset first")
+
+                x = fn.transform(x[None])[0]
+            else:
+                x = fn(x)
+
+            if len(x.shape) == 0 or x.size == 1:
+                X.append(x[None])
                 columns.append(col)
+            elif len(x.shape) == 1 and x.size > 1:
+                X.append(x)
+                columns.extend([f"{col}{i}" for i in range(len(x))])
+            else:
+                raise ValueError
 
-            for _ in range(2 - len(tmp.shape)):
-                tmp = tmp[None]
+        X = np.concatenate(X)
+        X = pd.DataFrame(X[None], columns=columns)
 
-            values.append(tmp)
-
-        values = np.concatenate(values, axis=1)
-        df = pd.DataFrame(values, columns=columns)
-
-        return self.update(data=df, _extractors=list(fns))
+        return self.update(data=X, _extractors=list(fns))
 
 
 class Components(Backref):
@@ -570,6 +598,7 @@ class LockedError(Exception):
 
 
 class GenericState:
+
     def __init__(self) -> None:
         self._locked = False
         self._msg = ""
@@ -605,8 +634,10 @@ class PowerSample(Generic):
     __high__: bool = False
 
     class State(GenericState):
+
         @classmethod
         def check(cls, method: Callable):
+
             def wrapper(self, *args, **kwargs):
                 if not issubclass(self.__class__, PowerSample):
                     raise ValueError("Argument \"self\" is required")
@@ -631,6 +662,7 @@ class PowerSample(Generic):
 
         @classmethod
         def check_init_args(cls, method):
+
             def wrapper(*args, **kwargs):
                 labels = kwargs.get("labels", None)
                 appliances = kwargs.get("appliances", None)
