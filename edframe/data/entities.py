@@ -374,10 +374,6 @@ class Events(Backref):
         raise NotImplementedError
 
 
-class Linkage:
-    pass
-
-
 class Features(BackrefDataFrame):
 
     # TODO onchange
@@ -430,9 +426,6 @@ class Features(BackrefDataFrame):
             if not isinstance(x, np.ndarray):
                 raise ValueError
 
-            if len(x.shape) != 1:
-                raise ValueError
-
             if isinstance(fn, BaseEstimator) or hasattr(fn, "fit")\
                 or hasattr(fn, "transform") or hasattr(fn, "fit_transform"):
 
@@ -442,9 +435,22 @@ class Features(BackrefDataFrame):
                     raise ValueError("The feature estimator was not fitted. "
                                      "Call this feature on a dataset first")
 
-                x = fn.transform(x[None])[0]
+                x = fn.transform(x[None])
+
+                if not isinstance(self.backref, DataSet):
+                    x = x[0]
             else:
-                x = fn(x)
+                shape = list(x.shape)
+                shape[-1] = 1
+                x = np.apply_along_axis(
+                    self.transform,
+                    axis=-1,  # TODO axis support
+                    arr=x,
+                    *args,
+                    **kwargs)
+                x = x.reshape(*shape)
+            else:
+                x = self.transform(x) # TODO args, kwargs
 
             if len(x.shape) == 0 or x.size == 1:
                 X.append(x[None])
