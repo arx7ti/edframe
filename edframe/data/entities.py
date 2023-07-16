@@ -805,6 +805,7 @@ class PowerSample(Generic):
     def apply(
         self,
         fns: Union[Callable, Iterable[Callable, F]],
+        # source_name: Optional[str]=None,
     ) -> PowerSample:
         if not isinstance(fns, Iterable):
             fns = [fns]
@@ -816,12 +817,18 @@ class PowerSample(Generic):
 
         for fn in fns:
             if not isinstance(fn, F):
+                # TODO generalize F to features and events?
                 arg = tuple(inspect.signature(fn).parameters)[0]
                 # TODO values to data
                 fn = F(fn, ("values", ), **{arg: "values"})
 
             # TODO must return signal
             ps = fn(ps)
+
+            # if not is_signal(ps.)
+            # if not isinstance(ps.source(), np.ndarray):
+            #     raise ValueError
+            # elif len(ps)
 
         return ps
 

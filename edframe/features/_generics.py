@@ -11,6 +11,8 @@ from ..data.entities import PowerSample, DataSet
 
 
 class Feature:
+    # TODO maybe rethink features? No need in class-based features, just methods
+    # dynamic detection of vector/scalar output
     transform: Callable | None = None
     estimator: BaseEstimator | None = None
     __numerical__: bool = True
