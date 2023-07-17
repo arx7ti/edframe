@@ -455,11 +455,8 @@ class Features(BackrefDataFrame):
             X = fn.transform(X if is_dataset else X[None])
             do_iters = False
         elif is_array and is_dataset:
-            shape = list(X.shape)
-            shape[1] = 1
             # TODO axis support
             X = np.apply_along_axis(fn, axis=1, arr=X, *args, **kwargs)
-            X = X.reshape(*shape)
             do_iters = False
         elif is_array:
             X = [X]
