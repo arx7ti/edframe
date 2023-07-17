@@ -988,6 +988,49 @@ class VISample(PowerSample):
         self.i = i
 
 
+class HISample(PowerSample):
+    __high__ = True
+
+    def __init__(
+        self,
+        i,
+        fs,
+        f0: float = None,
+        labels: Optional[Union[list[str], dict[str, float]]] = None,
+        components: Optional[np.ndarray] = None,
+        aggregation: Optional[str] = '+',
+        **kwargs: Any,
+    ):
+        super().__init__(data=i,
+                         fs=fs,
+                         fs_type="high",
+                         f0=f0,
+                         labels=labels,
+                         components=components,
+                         aggregation=aggregation,
+                         **kwargs)
+        self._2d = len(i.shape) == 2
+
+    def is_2d(self):
+        return self._2d
+
+    @property
+    def i(self):
+        return self.data
+
+    @i.setter
+    def i(self, i):
+        self.data = i
+
+    @property
+    def values(self):
+        return self.i
+
+    @values.setter
+    def values(self, i: np.ndarray):
+        self.i = i
+
+
 class DataSet(Generic):
     # TODO for each task its own implementation
     events = Events
@@ -1064,5 +1107,5 @@ class DataSet(Generic):
     #     return data
 
 
-class VIDataSet(DataSet):
+class HIDataSet(DataSet):
     pass

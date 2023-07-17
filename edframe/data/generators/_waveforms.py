@@ -9,6 +9,7 @@ import numpy as np
 # Internal packages
 from ... import utils
 from ... import signals
+from ..entities import HISample, DataSet
 
 
 class WaveformModel:
@@ -402,3 +403,25 @@ class FourierModel(WaveformModel):
         if squeeze:
             X = X[0]
         return X
+
+    def make_samples(self,
+                     n_samples: int = 100,
+                     imbalanced_clusters: bool = False,
+                     class_weights: list[float] | np.ndarray | None = None,
+                     std: float = 1,
+                     shuffle: bool = False,
+                     noise: bool = False,
+                     normalize: bool = False,
+                     **kwargs: Any) -> tuple[np.ndarray, np.ndarray]:
+        X, y = super().make_samples(n_samples, imbalanced_clusters,
+                                    class_weights, std, shuffle, noise,
+                                    normalize, **kwargs)
+        samples = []
+
+        for i, label in zip(X, y):
+            sample = HISample(i=i, fs=self._fs, f0=self._f0, labels=[label])
+            samples.append(sample)
+
+        dataset = DataSet(samples)
+
+        return dataset
