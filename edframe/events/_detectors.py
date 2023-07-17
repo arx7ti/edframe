@@ -46,13 +46,13 @@ class EventDetector:
                 
             x = x.reshape(x.shape[0] // window_size, window_size)
             
-            return x
         
         else: # impelent to use on full dataset of shape [n_samples, len_of_sample]
         # len(x.shape) >= 2:
             print('currently implemented for 1D arrays only')
             raise NotImplemented
         
+        return x
 
     def detect(self, x):
         raise NotImplementedError

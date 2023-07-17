@@ -1,13 +1,18 @@
 from __future__ import annotations
 
-import torch
+# import torch
 import inspect
+from multiprocessing import Value
 import numpy as np
 import pandas as pd
 
 from beartype import abby
 from copy import deepcopy
+from collections import defaultdict
 from beartype.typing import Iterable
+from sklearn.base import BaseEstimator
+from sklearn.utils.validation import check_is_fitted
+from sklearn.exceptions import NotFittedError
 from typing import Optional, Callable, Union, Any, Iterable
 
 from edframe.signals import F
@@ -154,21 +159,22 @@ class AttributeExtractors(Backref):
         values = [getattr(self, n) for n in self.names]
         return values
 
-    def __after__(self, _, extractors):
+    def __after__(self, _, data):
         names = []
 
-        for extractor in extractors:
+        for extractor in data:
             if inspect.isclass(extractor):
-                attr_name = extractor.__class__.__name__
-            else:
                 attr_name = extractor.__name__
-                # In case if extractors is imported from the submodule and
-                # recalled with use of "as" operator
-                # e.g. import <package>.<extractor_name> as <extractor_name>
-                attr_name_split = attr_name.split('.')
+            else:
+                attr_name = extractor.__class__.__name__
 
-                if len(attr_name_split) > 1:
-                    attr_name = attr_name_split[-1]
+            attr_name = attr_name.split('.')[-1]
+
+            # if extractor.is_estimator():
+            #     attr_value = extractor.estimator
+            # else:
+            #     attr_value = extractor.transform
+            # setattr(self, attr_name, attr_value)
 
             setattr(self, attr_name, extractor)
             names.append(attr_name)
@@ -288,59 +294,13 @@ class BackrefDataFrame(Backref):
 
     @property
     def extractors(self):
-        return AttributeExtractors(self._extractors)
+        return AttributeExtractors(self, data=self._extractors)
 
     def _check_callables(self, fs):
         pass
 
     def count(self):
         return len(self.names)
-
-    def get(
-            self,
-            fns: Callable | Iterable[Callable],
-            source: str = None,  # FIXME remove attr, add sample method instead
-    ) -> BackrefDataFrame:
-
-        self._check_callables(fns)
-
-        if source is None:
-            source_data = self.backref.values
-        else:
-            source_data = getattr(self.backref, source)
-
-        columns = []
-        values = []
-
-        for fn in fns:
-            if source is None:
-                column = str(fn)
-            else:
-                column = "%s_%s" % (source, str(fn))
-
-            # TODO Iterable[PowerSample]
-            # TODO to Feature.__call__
-            tmp = []
-            if abby.is_bearable(source_data, list[PowerSample]):
-                for source_data_i in source_data:
-                    tmp.append(fn(source_data_i))
-            else:
-                tmp = fn(source_data)
-
-                if fn.is_vector():
-                    values.extend(tmp)
-                else:
-                    values.append(tmp)
-
-            if fn.is_vector():
-                columns.extend([column + "_%i" % i for i in range(fn.numel())])
-            else:
-                columns.append(column)
-
-        values = np.asarray(values)
-        df = pd.DataFrame(values, columns=columns)
-
-        return self.update(data=df, _extractors=list(fns))
 
     def pop(self, name: str) -> pd.Series:
         item = self.data.pop(name)
@@ -368,7 +328,8 @@ class BackrefDataFrame(Backref):
     #     return self.data
 
 
-class Events(BackrefDataFrame):
+# TODO not DataFrame, but dict[timestamp, list[event.verbose_name]]
+class Events(Backref):
 
     @property
     def data(self) -> pd.DataFrame:
@@ -378,12 +339,46 @@ class Events(BackrefDataFrame):
     def data(self, data):
         self._data = data
 
+    @property
+    def extractors(self):
+        return AttributeExtractors(self, data=self._extractors)
+
+    def __call__(self, *args, **kwargs) -> BackrefDataFrame:
+        return self.detect(*args, **kwargs)
+
+    def __after__(self, *args, **kwargs):
+        self._extractors = []
+
+    def detect(
+        self,
+        fns: Callable | Iterable[Callable],
+        source_name: Optional[str] = None,
+    ) -> BackrefDataFrame:
+        # self._check_callables(fns)
+
+        data = defaultdict(list)
+
+        for fn in fns:
+            if source_name is not None:
+                fn.source_name = source_name
+
+            events = fn(self.backref)
+
+            for loc, sign in events:
+                data[loc].append((fn.verbose_name, sign))
+
+        data = dict(data)
+
+        return self.update(data=data, _extractors=list(fns))
+
     def to_features(self) -> Features:
-        pass
+        raise NotImplementedError
 
 
+class Linkage: pass
 class Features(BackrefDataFrame):
 
+    # TODO onchange
     @property
     def data(self) -> pd.DataFrame:
         return self._data
@@ -395,10 +390,10 @@ class Features(BackrefDataFrame):
         else:
             raise ValueError
 
+    def __call__(self, fns: Callable | Iterable[Callable]) -> BackrefDataFrame:
+        return self.extract(fns)
+
     def add(self, features: Union[Events, Features]) -> Features:
-        # TODO events
-        # TODO categorical
-        # TODO onchange
 
         if self.backref == features.backref:
             if isinstance(features, Events):
@@ -411,6 +406,114 @@ class Features(BackrefDataFrame):
             raise ValueError
 
         return self.update(data=values)
+
+    def extract(self, fns: Callable | Iterable[Callable]) -> BackrefDataFrame:
+        columns = []
+        values = []
+
+        for fn in fns:
+            if isinstance(fn, Linkage):
+                X = self.backref.source(fn.source_name)
+                col = fn.verbose_name
+                args = fn.args
+                kwargs = fn.kwargs
+            else:
+                X = self.backref.values
+
+                try:
+                    col = fn.__name__
+                except AttributeError:
+                    col = fn.__class__.__name__
+
+                col = col.split('.')[-1]
+                args = ()
+                kwargs = {}
+
+            is_estimator = isinstance(fn, BaseEstimator) or hasattr(fn, "fit")\
+                            or hasattr(fn, "transform") or hasattr(fn, "fit_transform")
+            is_dataset = isinstance(self.backref, DataSet)
+            is_array = isinstance(X, np.ndarray)
+
+            if is_estimator and is_array:
+                try:
+                    check_is_fitted(fn)
+                except NotFittedError:
+
+                    if is_dataset:
+                        fn.fit(X)
+                    else:
+                        raise ValueError(
+                            "The feature estimator was not fitted. "
+                            "Call this feature on a dataset first")
+
+                X = fn.transform(X)
+                do_iters = False
+            elif is_array and is_dataset:
+                shape = list(X.shape)
+                shape[1] = 1
+                # TODO axis support
+                X = np.apply_along_axis(fn, axis=1, arr=X, *args, **kwargs)
+                X = X.reshape(*shape)
+                do_iters = False
+            elif is_array:
+                X = [X]
+                do_iters = True
+            elif is_dataset:
+                do_iters = True
+            else:
+                raise ValueError
+
+            if do_iters:
+                X = self._to_array([fn(x) for x in X])
+
+            if len(X.shape) != 2:
+                raise ValueError("2D")
+
+            values.append(X)
+            
+            if X.shape[1]:
+                columns.append(col)
+            else:
+                columns.extend([f"{col}{i}" for i in range(X.shape[1])])
+
+        values = np.concatenate(values, axis=1)
+        df = pd.DataFrame(values, columns=columns)
+
+        return self.update(data=df, _extractors=list(fns))
+    
+    @classmethod
+    def _to_array(cls, x: Any) -> np.ndarray:
+        if isinstance(x, Iterable) and not isinstance(x, (list, tuple)):
+            x = list(x)
+
+        if isinstance(x, Iterable):
+            l = None 
+            xlist = []
+
+            for _x in x:
+                if isinstance(_x, (list, tuple, np.ndarray)):
+                    xlist.append(_x)
+                else:
+                    _xlist = [_x for _x in _x]
+
+                    if any(isinstance(__x, Iterable) for __x in _xlist):
+                        raise ValueError
+
+                    xlist.append(_xlist)
+
+                if l is None:
+                    l = len(xlist[-1])
+                elif len(xlist[-1]) != l:
+                    raise ValueError
+        else:
+            xlist = x
+        
+        x = np.asarray(xlist)
+
+        if len(x.shape) == 1:
+            x = x[:, None]
+
+        return x
 
 
 class Components(Backref):
@@ -498,7 +601,7 @@ class Components(Backref):
     ) -> Components:
         if self.is_allowed_transform():
             if isinstance(fs, Callable):
-                values = np.apply_along_axis(fs, axis=0, arr=self.data)
+                data = np.apply_along_axis(fs, axis=0, arr=self.data)
             elif abby.is_bearable(
                     fs, Iterable[Callable | tuple[int, Callable] | None]):
                 if abby.is_bearable(fs, Iterable[Callable | None]):
@@ -508,22 +611,23 @@ class Components(Backref):
                         raise ValueError
                 elif not abby.is_bearable(fs, Iterable[tuple[int, Callable]]):
                     raise ValueError
-                values = np.empty_like(self.data)
+
+                data = np.empty_like(self.data)
                 mask = np.ones(self.count(), dtype=bool)
+
                 for _fs in fs:
-                    if _fs is None:
-                        continue
-                    else:
+                    if _fs is not None:
                         i, f = _fs
-                        values[i] = f(self.data[i])
+                        data[i] = f(self.data[i])
                         mask[i] = False
-                values[mask] = self.data[mask]
+
+                data[mask] = self.data[mask]
             else:
                 raise ValueError
         else:
             raise AttributeError("Transformation is not allowed")
 
-        return self.update(data=values)
+        return self.update(data=data)
 
     def map(
         self,
@@ -535,9 +639,6 @@ class Components(Backref):
         for v in self.data:
             values.append(f(v, *args, **kwargs))
         return values
-
-    # def crop(self, a, b):
-    #     return self.transform(crop, a, b)
 
     def sum(self, rule: str = "+"):
         if rule == "+":
@@ -581,12 +682,11 @@ class GenericState:
 class PowerSample(Generic):
     # TODO about named vars, v,i, p etc. to be used further e.g. from Features
 
-    events = Events
-    features = Features
-    components = Components
-
-    class Meta:
-        values_attr = None
+    events: Events = Events
+    features: Features = Features
+    components: Components = Components
+    __low__: bool = False  # TODO add check
+    __high__: bool = False
 
     class State(GenericState):
 
@@ -771,26 +871,28 @@ class PowerSample(Generic):
     # TODO 3. if labels
     # TODO 4. if labels and components
 
-    @property
-    def appliances(self):
-        return self._appliances
-
     @State.check
-    def __getitem__(self, locs):
-        data = self.data[locs]
+    def __getitem__(self, ab: slice):
+        if not isinstance(ab, slice):
+            raise ValueError
+
+        values = self.values[ab]
+        components = self.components
+        locs = self.locs
         # TODO
-        # ps._data = ps._data[locs]
-        if self.components.count() > 0:
-            components = self.components[:, locs]
-        if self.locs is not None:
-            locs = np.clips(self.locs, a_min=locs[:, 0], a_max=locs[:, 1])
-            # TODO locs?
-        return self.update(data=data, _locs=locs, _components=components)
+        if components.count() > 0:
+            components = components[:, ab]
+        if locs is not None:
+            a = 0 if ab.start is None else ab.start
+            b = len(values) - a if ab.stop is None else ab.stop
+            locs = np.clips(locs, a_min=a, a_max=b - 1)
+        return self.update(values=values, _locs=locs, _components=components)
 
     @State.check
     def apply(
         self,
         fns: Union[Callable, Iterable[Callable, F]],
+        # source_name: Optional[str]=None,
     ) -> PowerSample:
         if not isinstance(fns, Iterable):
             fns = [fns]
@@ -802,28 +904,49 @@ class PowerSample(Generic):
 
         for fn in fns:
             if not isinstance(fn, F):
+                # TODO generalize F to features and events?
                 arg = tuple(inspect.signature(fn).parameters)[0]
                 # TODO values to data
                 fn = F(fn, ("values", ), **{arg: "values"})
 
+            # TODO must return signal
             ps = fn(ps)
+
+            # if not is_signal(ps.)
+            # if not isinstance(ps.source(), np.ndarray):
+            #     raise ValueError
+            # elif len(ps)
 
         return ps
 
+    def map(self, fns):
+        # TODO signal to custom value
+        pass
+
     @property
-    def values(self):
-        return getattr(self, self.Meta.values_attr)
+    def values(self) -> Any:
+        raise NotImplementedError
 
     @values.setter
-    def values(self, values):
-        # TODO check setters in inherited classes
-        return setattr(self, self.Meta.values_attr, values)
+    def values(self, values: Any) -> None:
+        raise NotImplementedError
+
+    def source(self, source_name: str):
+        return getattr(self, source_name)
+
+    def set_source(self, source_name: str, source_values: Any):
+        setattr(self, source_name, source_values)
+
+    def crop(self, a=None, b=None, roi=None) -> list[PowerSample]:
+        if a is not None and b is not None:
+            return self[a:b]
+
+        if roi is not None:
+            return roi.crop(self)
 
 
 class VISample(PowerSample):
-
-    class Meta:
-        values_attr = "i"
+    __high__ = True
 
     def __init__(
         self,
@@ -848,6 +971,10 @@ class VISample(PowerSample):
                          components=components,
                          aggregation=aggregation,
                          **kwargs)
+        self._2d = len(v.shape) == len(i.shape) == 2
+
+    def is_2d(self):
+        return self._2d
 
     @property
     def v(self):
@@ -855,8 +982,6 @@ class VISample(PowerSample):
 
     @v.setter
     def v(self, v):
-        # if v.shape != self.v.shape:
-        #     raise ValueError
         self.data[0] = v
 
     @property
@@ -865,13 +990,19 @@ class VISample(PowerSample):
 
     @i.setter
     def i(self, i):
-        # if i.shape != self.i.shape:
-        #     raise ValueError
         self.data[1] = i
 
     @property
     def s(self):
         return self.v * self.i
+
+    @property
+    def values(self):
+        return self.i
+
+    @values.setter
+    def values(self, i: np.ndarray):
+        self.i = i
 
 
 class DataSet(Generic):
@@ -923,10 +1054,26 @@ class DataSet(Generic):
 
         return self.update(data=data)
 
-    def is_aligned(self):
-        lens = [len(s.values) for s in self.data]
+    def is_aligned(self, source_name: Optional[str] = None):
+        if source_name is None:
+            source_name = "values"
+
+        lens = [len(s.source(source_name)) for s in self.data]
         lens = np.asarray(lens)
+
         return all(lens[0] == lens[1:])
+
+    def source(self, source_name: str):
+        values = [s.source(source_name) for s in self.data]
+
+        if self.is_aligned(source_name=source_name):
+            values = np.asarray(values)
+
+        return values
+
+    @property
+    def values(self):
+        return self.source("values")
 
     # TODO
     # def map(self, fs):
@@ -935,12 +1082,4 @@ class DataSet(Generic):
 
 
 class VIDataSet(DataSet):
-
-    @property
-    def values(self):
-        values = [s.values for s in self.data]
-
-        if self.is_aligned():
-            values = np.asarray(values)
-
-        return values
+    pass
