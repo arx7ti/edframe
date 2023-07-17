@@ -410,79 +410,91 @@ class Features(BackrefDataFrame):
 
         return self.update(data=values)
 
+    def _get_initial_data(
+        self,
+        fn: Callable | Linkage,
+    ) -> tuple[np.ndarray | Iterable["np.ndarray"], str, tuple, dict]:
+        if isinstance(fn, Linkage):
+            X = self.backref.source(fn.source_name)
+            column_name = fn.verbose_name
+            args = fn.args
+            kwargs = fn.kwargs
+        else:
+            X = self.backref.values
+
+            try:
+                column_name = fn.__name__
+            except AttributeError:
+                column_name = fn.__class__.__name__
+
+            column_name = column_name.split('.')[-1]
+            args = ()
+            kwargs = {}
+
+        return X, column_name, args, kwargs
+
+    def _compute_feature(self, fn):
+        X, column_name, args, kwargs = self._get_initial_data(fn)
+
+        is_estimator = isinstance(fn, BaseEstimator) or hasattr(fn, "fit")\
+                        or hasattr(fn, "transform") or hasattr(fn, "fit_transform")
+        is_dataset = isinstance(self.backref, DataSet)
+        is_array = isinstance(X, np.ndarray)
+
+        if is_estimator and is_array:
+            try:
+                check_is_fitted(fn)
+            except NotFittedError:
+
+                if is_dataset:
+                    fn.fit(X)
+                else:
+                    raise ValueError("The feature estimator was not fitted. "
+                                     "Call this feature on a dataset first")
+
+            X = fn.transform(X if is_dataset else X[None])
+            do_iters = False
+        elif is_array and is_dataset:
+            shape = list(X.shape)
+            shape[1] = 1
+            # TODO axis support
+            X = np.apply_along_axis(fn, axis=1, arr=X, *args, **kwargs)
+            X = X.reshape(*shape)
+            do_iters = False
+        elif is_array:
+            X = [X]
+            do_iters = True
+        elif is_dataset:
+            do_iters = True
+        else:
+            raise ValueError
+
+        try:
+            X = np.asarray([fn(x) for x in X]) if do_iters else X
+        except ValueError:
+            raise ValueError
+
+        X = X[:, None] if len(X.shape) == 1 else X
+
+        if len(X.shape) != 2:
+            raise ValueError
+
+        if X.shape[1] < 2:
+            column_names = [column_name]
+        else:
+            column_names = [f"{column_name}{i}" for i in range(X.shape[1])]
+
+        return X, column_names
+
     def extract(self, fns: Callable | Iterable[Callable]) -> BackrefDataFrame:
         columns = []
         values = []
 
-        for fn in fns:
-            if isinstance(fn, Linkage):
-                X = self.backref.source(fn.source_name)
-                col = fn.verbose_name
-                args = fn.args
-                kwargs = fn.kwargs
-            else:
-                X = self.backref.values
-
-                try:
-                    col = fn.__name__
-                except AttributeError:
-                    col = fn.__class__.__name__
-
-                col = col.split('.')[-1]
-                args = ()
-                kwargs = {}
-
-            is_estimator = isinstance(fn, BaseEstimator) or hasattr(fn, "fit")\
-                            or hasattr(fn, "transform") or hasattr(fn, "fit_transform")
-            is_dataset = isinstance(self.backref, DataSet)
-            is_array = isinstance(X, np.ndarray)
-
-            if is_estimator and is_array:
-                try:
-                    check_is_fitted(fn)
-                except NotFittedError:
-
-                    if is_dataset:
-                        fn.fit(X)
-                    else:
-                        raise ValueError(
-                            "The feature estimator was not fitted. "
-                            "Call this feature on a dataset first")
-
-                X = fn.transform(X if is_dataset else X[None])
-                do_iters = False
-            elif is_array and is_dataset:
-                shape = list(X.shape)
-                shape[1] = 1
-                # TODO axis support
-                X = np.apply_along_axis(fn, axis=1, arr=X, *args, **kwargs)
-                X = X.reshape(*shape)
-                do_iters = False
-            elif is_array:
-                X = [X]
-                do_iters = True
-            elif is_dataset:
-                do_iters = True
-            else:
-                raise ValueError
-
-            try:
-                X = np.asarray([fn(x) for x in X]) if do_iters else X
-            except ValueError:
-                raise ValueError()
-
-            if len(X.shape) == 1:
-                X = X[:, None]
-
-            if len(X.shape) != 2:
-                raise ValueError
+        for fn in fns if isinstance(fns, Iterable) else [fns]:
+            X, column_names = self._compute_feature(fn)
 
             values.append(X)
-
-            if X.shape[1] < 2:
-                columns.append(col)
-            else:
-                columns.extend([f"{col}{i}" for i in range(X.shape[1])])
+            columns.extend(column_names)
 
         values = np.concatenate(values, axis=1)
         df = pd.DataFrame(values, columns=columns)
