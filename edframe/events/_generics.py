@@ -87,8 +87,6 @@ class EventDetector:
         for _x in x:
             e.append(self.detect(_x, **kwargs))
 
-        e = list(it.chain(*e))
-
         return e
 
     def _check_compatibility(
@@ -295,16 +293,20 @@ class ROI:
 
             return roi
 
-        # if isinstance(x, DataSet):
-        #     roi = []
+        if isinstance(x, DataSet):
+            # TODO the same style for event detectors
+            # TODO the same style for feature extraction
+            roi = []
 
-        #     for _x in x.values:
-        #         roi.append(_crop(_x, self._detectors))
+            for _x in x.values:
+                roi.append(_crop(_x, self._detectors))
 
-        #     dataset = x.__class__(roi)
+            dataset = x.__class__(roi)
 
-        #     return dataset
+            return dataset
 
-        # roi = _crop(x, self._detectors)
+        roi = _crop(x, self._detectors)
 
-        return _crop(x, self._detectors)
+        return roi
+
+        # return _crop(x, self._detectors)
