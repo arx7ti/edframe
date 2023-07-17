@@ -1033,6 +1033,8 @@ class HISample(PowerSample):
 
 class DataSet(Generic):
     # TODO for each task its own implementation
+    __low__ = False
+    __high__ = False
     events = Events
     features = Features
 
@@ -1108,4 +1110,4 @@ class DataSet(Generic):
 
 
 class HIDataSet(DataSet):
-    pass
+    __high__ = True

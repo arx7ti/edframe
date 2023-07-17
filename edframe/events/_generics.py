@@ -5,6 +5,7 @@ from sklearn.cluster import AgglomerativeClustering
 from beartype import abby
 
 import numpy as np
+import itertools as it
 
 from ..data.entities import PowerSample, DataSet
 
@@ -63,8 +64,8 @@ class EventDetector:
         self._window = window
         self._window_size = window_size
 
-    def __call__(self, x: PowerSample | DataSet | np.ndarray):
-        return self.detect(x)
+    def __call__(self, x: PowerSample | DataSet | np.ndarray, **kwargs):
+        return self.detect(x, **kwargs)
 
     def _striding_window_view(self, x: np.ndarray) -> np.ndarray:
         axes = x.shape[:-1]
@@ -81,10 +82,14 @@ class EventDetector:
         return x
 
     def _detect_from_dataset(self, x: DataSet, **kwargs):
-        v = []
+        e = []
+
         for _x in x:
-            v.append(self.detect(_x, **kwargs))
-        return v
+            e.append(self.detect(_x, **kwargs))
+
+        e = list(it.chain(*e))
+
+        return e
 
     def _check_compatibility(
         self,
@@ -112,6 +117,7 @@ class ThresholdEvent(EventDetector):
         above: bool = True,
         window_size: int = 80,
         verbose_name: Optional[str] = None,
+        source_name: Optional[str] = None,
     ) -> None:
         super().__init__(window=window,
                          window_size=window_size,
@@ -119,19 +125,18 @@ class ThresholdEvent(EventDetector):
         self._alpha = alpha
         self._window_size = window_size
         self._above = above
+        self._source_name = "values" if source_name is None else source_name
 
     def detect(self, x: PowerSample | DataSet | np.ndarray, **kwargs):
         self._check_compatibility(x)
 
-        if isinstance(x, PowerSample | DataSet):
-            x = x.values
-        elif not isinstance(x, np.ndarray):
-            raise ValueError
-
-        if abby.is_bearable(x, list[PowerSample]):
+        if isinstance(x, DataSet):
             return self._detect_from_dataset(x, **kwargs)
 
-        is_dataset = kwargs.pop("is_dataset", len(x.shape) > 1)
+        if isinstance(x, PowerSample):
+            x = x.source(self.source_name)
+        # elif not isinstance(x, np.ndarray):
+        #     raise ValueError
 
         if not isinstance(x, np.ndarray):
             raise ValueError
@@ -139,7 +144,7 @@ class ThresholdEvent(EventDetector):
         if len(x.shape) > 1:
             raise ValueError("Only 1D signals are supported")
 
-        self.check_fn(x, is_dataset=is_dataset, **kwargs)
+        self.check_fn(x, **kwargs)
 
         n = len(x)
         x = self._striding_window_view(x)
@@ -190,20 +195,16 @@ class DerivativeEvent(EventDetector):
     def detect(self, x: np.ndarray, **kwargs):
         self._check_compatibility(x)
 
-        if isinstance(x, PowerSample | DataSet):
-            x = x.source(self.source_name)
-        elif not isinstance(x, np.ndarray):
-            raise ValueError
-
-        if abby.is_bearable(x, list[PowerSample]):
+        if isinstance(x, DataSet):
             return self._detect_from_dataset(x, **kwargs)
 
-        is_dataset = kwargs.pop("is_dataset", len(x.shape) > 1)
+        if isinstance(x, PowerSample):
+            x = x.source(self.source_name)
 
         if not isinstance(x, np.ndarray):
             raise ValueError
 
-        self.check_fn(x, is_dataset=is_dataset, **kwargs)
+        self.check_fn(x, **kwargs)
 
         x = self._striding_window_view(x)
         x = np.apply_along_axis(self._window, axis=1, arr=x)
@@ -246,6 +247,7 @@ class DerivativeEvent(EventDetector):
 
 
 class ROI:
+
     def __init__(self, detectors: EventDetector | Iterable["EventDetector"]):
         if isinstance(detectors, EventDetector):
             detectors = [detectors]
@@ -263,6 +265,7 @@ class ROI:
         self,
         x: PowerSample | DataSet | np.ndarray,
     ) -> PowerSample | DataSet | np.ndarray:
+
         def _crop(x: PowerSample | np.ndarray, detectors):
             detector0 = detectors[0]
             events0 = detector0(x)
@@ -291,5 +294,17 @@ class ROI:
                     roi.append(xab0)
 
             return roi
+
+        # if isinstance(x, DataSet):
+        #     roi = []
+
+        #     for _x in x.values:
+        #         roi.append(_crop(_x, self._detectors))
+
+        #     dataset = x.__class__(roi)
+
+        #     return dataset
+
+        # roi = _crop(x, self._detectors)
 
         return _crop(x, self._detectors)
