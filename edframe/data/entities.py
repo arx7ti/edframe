@@ -152,6 +152,7 @@ class Backref(Generic):
 
 
 class AttributeExtractors(Backref):
+
     @property
     def values(self):
         values = [getattr(self, n) for n in self.names]
@@ -328,6 +329,7 @@ class BackrefDataFrame(Backref):
 
 # TODO not DataFrame, but dict[timestamp, list[event.verbose_name]]
 class Events(Backref):
+
     @property
     def data(self) -> pd.DataFrame:
         return self._data
@@ -405,12 +407,14 @@ class Features(BackrefDataFrame):
 
     def extract(self, fns: Callable | Iterable[Callable]) -> BackrefDataFrame:
         columns = []
-        F = []
+        values = []
 
         for fn in fns:
             if isinstance(fn, Linkage):
                 X = self.backref.source(fn.source_name)
                 col = fn.verbose_name
+                args = fn.args
+                kwargs = fn.kwargs
             else:
                 X = self.backref.values
 
@@ -420,78 +424,69 @@ class Features(BackrefDataFrame):
                     col = fn.__class__.__name__
 
                 col = col.split('.')[-1]
+                args = ()
+                kwargs = {}
 
-            do_iters = True
+            is_estimator = isinstance(fn, BaseEstimator) or hasattr(fn, "fit")\
+                            or hasattr(fn, "transform") or hasattr(fn, "fit_transform")
+            is_dataset = isinstance(self.backref, DataSet)
+            is_array = isinstance(X, np.ndarray)
 
-            if not isinstance(self.backref, DataSet)\
-                and isinstance(X, np.ndarray):
-                X = [X]
-            elif isinstance(self.backref, DataSet)\
-                and isinstance(X, np.ndarray):
+            if is_estimator and is_array:
+                try:
+                    check_is_fitted(fn)
+                except NotFittedError:
 
-                if isinstance(fn, BaseEstimator) or hasattr(fn, "fit")\
-                    or hasattr(fn, "transform") or hasattr(fn, "fit_transform"):
-
-                    try:
-                        check_is_fitted(fn)
-                    except NotFittedError:
+                    if is_dataset:
+                        fn.fit(X)
+                    else:
                         raise ValueError(
                             "The feature estimator was not fitted. "
                             "Call this feature on a dataset first")
 
-                    fn.fit(X)
-                    X = fn.transform(X)
-                else:
-                    shape = list(x.shape)
-                    shape[-1] = 1
-                    x = np.apply_along_axis(
-                        self.transform,
-                        axis=-1,  # TODO axis support
-                        arr=x,
-                        *args,
-                        **kwargs)
-                    x = x.reshape(*shape)
-
+                X = fn.transform(X)
                 do_iters = False
-
-            for x in X:
-                if not do_iters:
-                    break
-
-                if not isinstance(x, np.ndarray):
-                    raise ValueError
-
-                if isinstance(fn, BaseEstimator) or hasattr(fn, "fit")\
-                    or hasattr(fn, "transform") or hasattr(fn, "fit_transform"):
-
-                    try:
-                        check_is_fitted(fn)
-                    except NotFittedError:
-                        raise ValueError(
-                            "The feature estimator was not fitted. "
-                            "Call this feature on a dataset first")
-
-                    x = fn.transform(x[None])
-
-                    if not isinstance(self.backref, DataSet):
-                        x = x[0]
-                # elif isinstance(self.backref, DataSet):
-                else:
-                    x = fn(x)  # TODO args, kwargs
-
-            if len(x.shape) == 0 or x.size == 1:
-                X.append(x[None])
-                columns.append(col)
-            elif len(x.shape) == 1 and x.size > 1:
-                X.append(x)
-                columns.extend([f"{col}{i}" for i in range(len(x))])
+            elif is_array and is_dataset:
+                shape = list(X.shape)
+                shape[1] = 1
+                # TODO axis support
+                X = np.apply_along_axis(fn, axis=1, arr=X, *args, **kwargs)
+                X = X.reshape(*shape)
+                do_iters = False
+            elif is_array:
+                X = [X]
+                do_iters = True
+            elif is_dataset:
+                do_iters = True
             else:
                 raise ValueError
 
-        X = np.concatenate(X)
-        X = pd.DataFrame(X[None], columns=columns)
+            if do_iters:
+                X = [fn(x) for x in X]
+                ls = [X[0].shape == x.shape for x in X]
 
-        return self.update(data=X, _extractors=list(fns))
+                if all(ls):
+                    X = np.asarray(X)
+                else:
+                    raise ValueError(
+                        "Feature must have the same dimensions for all samples"
+                    )
+
+            values.append(X)
+
+            n_rows = X.shape[0]
+
+            if len(X.shape) == 1 or X.size == 1:
+                columns.append(col)
+            elif len(X.shape) == 2 and X.shape[1] > 1:
+                columns.extend([f"{col}{i}" for i in range(X.shape[1])])
+            else:
+                raise ValueError
+
+        values = np.concatenate(values, axis=1)
+        df = pd.DataFrame(values, columns=columns)
+
+        return self.update(data=df, _extractors=list(fns))
 
 
 class Components(Backref):
@@ -631,6 +626,7 @@ class LockedError(Exception):
 
 
 class GenericState:
+
     def __init__(self) -> None:
         self._locked = False
         self._msg = ""
@@ -666,8 +662,10 @@ class PowerSample(Generic):
     __high__: bool = False
 
     class State(GenericState):
+
         @classmethod
         def check(cls, method: Callable):
+
             def wrapper(self, *args, **kwargs):
                 if not issubclass(self.__class__, PowerSample):
                     raise ValueError("Argument \"self\" is required")
@@ -692,6 +690,7 @@ class PowerSample(Generic):
 
         @classmethod
         def check_init_args(cls, method):
+
             def wrapper(*args, **kwargs):
                 labels = kwargs.get("labels", None)
                 appliances = kwargs.get("appliances", None)
