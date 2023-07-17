@@ -375,7 +375,10 @@ class Events(Backref):
         raise NotImplementedError
 
 
-class Linkage: pass
+class Linkage:
+    pass
+
+
 class Features(BackrefDataFrame):
 
     # TODO onchange
@@ -434,7 +437,7 @@ class Features(BackrefDataFrame):
             is_dataset = isinstance(self.backref, DataSet)
             is_array = isinstance(X, np.ndarray)
 
-            if is_estimator and is_array:
+            if is_estimator:
                 try:
                     check_is_fitted(fn)
                 except NotFittedError:
@@ -446,7 +449,7 @@ class Features(BackrefDataFrame):
                             "The feature estimator was not fitted. "
                             "Call this feature on a dataset first")
 
-                X = fn.transform(X)
+                X = fn.transform(X[None] if is_array else X)
                 do_iters = False
             elif is_array and is_dataset:
                 shape = list(X.shape)
@@ -463,15 +466,20 @@ class Features(BackrefDataFrame):
             else:
                 raise ValueError
 
-            if do_iters:
-                X = self._to_array([fn(x) for x in X])
+            try:
+                X = np.asarray([fn(x) for x in X]) if do_iters else X
+            except ValueError:
+                raise ValueError()
+
+            if len(X.shape) == 1:
+                X = X[:, None]
 
             if len(X.shape) != 2:
-                raise ValueError("2D")
+                raise ValueError
 
             values.append(X)
-            
-            if X.shape[1]:
+
+            if X.shape[1] < 2:
                 columns.append(col)
             else:
                 columns.extend([f"{col}{i}" for i in range(X.shape[1])])
@@ -480,40 +488,34 @@ class Features(BackrefDataFrame):
         df = pd.DataFrame(values, columns=columns)
 
         return self.update(data=df, _extractors=list(fns))
-    
-    @classmethod
-    def _to_array(cls, x: Any) -> np.ndarray:
-        if isinstance(x, Iterable) and not isinstance(x, (list, tuple)):
-            x = list(x)
 
-        if isinstance(x, Iterable):
-            l = None 
-            xlist = []
+    # @classmethod
+    # def _to_2darray(cls, x: Iterable) -> np.ndarray:
+    #     if isinstance(x, Iterable):
+    #         xlist = []
 
-            for _x in x:
-                if isinstance(_x, (list, tuple, np.ndarray)):
-                    xlist.append(_x)
-                else:
-                    _xlist = [_x for _x in _x]
+    #         for _x in x:
+    #             if isinstance(_x, (list, tuple, np.ndarray, )):
+    #                 xlist.append(_x)
+    #             else:
+    #                 print(_x, isinstance(_x, np.ndarray), type(_x))
+    #                 _xlist = [_x for _x in _x]
 
-                    if any(isinstance(__x, Iterable) for __x in _xlist):
-                        raise ValueError
+    #                 if any(isinstance(__x, Iterable) for __x in _xlist):
+    #                     raise ValueError
 
-                    xlist.append(_xlist)
+    #                 xlist.append(_xlist)
 
-                if l is None:
-                    l = len(xlist[-1])
-                elif len(xlist[-1]) != l:
-                    raise ValueError
-        else:
-            xlist = x
-        
-        x = np.asarray(xlist)
+    #             if l is None:
+    #                 l = len(xlist[-1])
+    #             elif len(xlist[-1]) != l:
+    #                 raise ValueError
+    #     else:
+    #         xlist = x
 
-        if len(x.shape) == 1:
-            x = x[:, None]
+    #     x = np.asarray(xlist)
 
-        return x
+    #     return x
 
 
 class Components(Backref):
