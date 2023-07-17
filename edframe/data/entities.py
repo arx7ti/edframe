@@ -152,7 +152,6 @@ class Backref(Generic):
 
 
 class AttributeExtractors(Backref):
-
     @property
     def values(self):
         values = [getattr(self, n) for n in self.names]
@@ -329,7 +328,6 @@ class BackrefDataFrame(Backref):
 
 # TODO not DataFrame, but dict[timestamp, list[event.verbose_name]]
 class Events(Backref):
-
     @property
     def data(self) -> pd.DataFrame:
         return self._data
@@ -407,14 +405,14 @@ class Features(BackrefDataFrame):
 
     def extract(self, fns: Callable | Iterable[Callable]) -> BackrefDataFrame:
         columns = []
-        X = []
+        F = []
 
         for fn in fns:
             if isinstance(fn, Linkage):
-                x = self.backref.source(fn.source_name)
+                X = self.backref.source(fn.source_name)
                 col = fn.verbose_name
             else:
-                x = self.backref.values
+                X = self.backref.values
 
                 try:
                     col = fn.__name__
@@ -423,34 +421,63 @@ class Features(BackrefDataFrame):
 
                 col = col.split('.')[-1]
 
-            if not isinstance(x, np.ndarray):
-                raise ValueError
+            do_iters = True
 
-            if isinstance(fn, BaseEstimator) or hasattr(fn, "fit")\
-                or hasattr(fn, "transform") or hasattr(fn, "fit_transform"):
+            if not isinstance(self.backref, DataSet)\
+                and isinstance(X, np.ndarray):
+                X = [X]
+            elif isinstance(self.backref, DataSet)\
+                and isinstance(X, np.ndarray):
 
-                try:
-                    check_is_fitted(fn)
-                except NotFittedError:
-                    raise ValueError("The feature estimator was not fitted. "
-                                     "Call this feature on a dataset first")
+                if isinstance(fn, BaseEstimator) or hasattr(fn, "fit")\
+                    or hasattr(fn, "transform") or hasattr(fn, "fit_transform"):
 
-                x = fn.transform(x[None])
+                    try:
+                        check_is_fitted(fn)
+                    except NotFittedError:
+                        raise ValueError(
+                            "The feature estimator was not fitted. "
+                            "Call this feature on a dataset first")
 
-                if not isinstance(self.backref, DataSet):
-                    x = x[0]
-            else:
-                shape = list(x.shape)
-                shape[-1] = 1
-                x = np.apply_along_axis(
-                    self.transform,
-                    axis=-1,  # TODO axis support
-                    arr=x,
-                    *args,
-                    **kwargs)
-                x = x.reshape(*shape)
-            else:
-                x = self.transform(x) # TODO args, kwargs
+                    fn.fit(X)
+                    X = fn.transform(X)
+                else:
+                    shape = list(x.shape)
+                    shape[-1] = 1
+                    x = np.apply_along_axis(
+                        self.transform,
+                        axis=-1,  # TODO axis support
+                        arr=x,
+                        *args,
+                        **kwargs)
+                    x = x.reshape(*shape)
+
+                do_iters = False
+
+            for x in X:
+                if not do_iters:
+                    break
+
+                if not isinstance(x, np.ndarray):
+                    raise ValueError
+
+                if isinstance(fn, BaseEstimator) or hasattr(fn, "fit")\
+                    or hasattr(fn, "transform") or hasattr(fn, "fit_transform"):
+
+                    try:
+                        check_is_fitted(fn)
+                    except NotFittedError:
+                        raise ValueError(
+                            "The feature estimator was not fitted. "
+                            "Call this feature on a dataset first")
+
+                    x = fn.transform(x[None])
+
+                    if not isinstance(self.backref, DataSet):
+                        x = x[0]
+                # elif isinstance(self.backref, DataSet):
+                else:
+                    x = fn(x)  # TODO args, kwargs
 
             if len(x.shape) == 0 or x.size == 1:
                 X.append(x[None])
@@ -604,7 +631,6 @@ class LockedError(Exception):
 
 
 class GenericState:
-
     def __init__(self) -> None:
         self._locked = False
         self._msg = ""
@@ -640,10 +666,8 @@ class PowerSample(Generic):
     __high__: bool = False
 
     class State(GenericState):
-
         @classmethod
         def check(cls, method: Callable):
-
             def wrapper(self, *args, **kwargs):
                 if not issubclass(self.__class__, PowerSample):
                     raise ValueError("Argument \"self\" is required")
@@ -668,7 +692,6 @@ class PowerSample(Generic):
 
         @classmethod
         def check_init_args(cls, method):
-
             def wrapper(*args, **kwargs):
                 labels = kwargs.get("labels", None)
                 appliances = kwargs.get("appliances", None)
