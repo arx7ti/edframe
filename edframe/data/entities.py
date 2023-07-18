@@ -2,9 +2,9 @@ from __future__ import annotations
 
 # import torch
 import inspect
-from multiprocessing import Value
 import numpy as np
 import pandas as pd
+import itertools as it
 
 from beartype import abby
 from copy import deepcopy
@@ -13,6 +13,7 @@ from beartype.typing import Iterable
 from sklearn.base import BaseEstimator
 from sklearn.utils.validation import check_is_fitted
 from sklearn.exceptions import NotFittedError
+from sklearn.preprocessing import MultiLabelBinarizer
 from typing import Optional, Callable, Union, Any, Iterable
 
 from edframe.signals import F
@@ -1032,14 +1033,81 @@ class HISample(PowerSample):
 
 
 class DataSet(Generic):
-    # TODO for each task its own implementation
+    # TODO for each subclass its own implementation
     __low__ = False
     __high__ = False
     events = Events
     features = Features
 
     def __init__(self, data) -> None:
+        # self._check_fs()
+
         self._data = data
+
+        dtypes = set()
+        class_labels = []
+        labels = []
+        self._n_components = 0
+
+        for s in data:
+            # TODO if no labels
+            if isinstance(s.labels, dict):
+                _class_labels = list(s.labels.keys())
+                _labels = list(s.labels.values())
+            else:
+                _class_labels = s.labels
+                _labels = s.labels
+
+            class_labels.append(_class_labels)
+            labels.append(_labels)
+            dtypes |= {
+                type(v.item()) if hasattr(v, "item") else type(v)
+                for v in _labels
+            }
+            self._n_components = max(self._n_components, len(_labels))
+
+        self._class_names = set(it.chain(*class_labels))
+        cn_dtypes = {type(cn) for cn in self._class_names}
+
+        # TODO move labels type check inside sample's class
+        if len(dtypes) != 1:
+            raise TypeError("All class labels must have the same type")
+
+        if len(cn_dtypes) != 1:
+            raise TypeError("All labels must have the same type")
+
+        cn_dtype = cn_dtypes.pop()
+
+        if cn_dtype is not str:
+            raise TypeError("Class names must be str")
+
+        mlbin = MultiLabelBinarizer()
+        mlbin.fit(self._class_names)
+        dtype = dtypes.pop()
+
+        if dtype is str:
+            ml_problem_type = "classification"
+        elif dtype is float:
+            ml_problem_type = "regression"
+        elif dtype is int:
+            ml_problem_type = "ranking"
+        else:
+            raise ValueError
+
+        y = np.empty((len(data), len(self._class_names)),
+                     dtype=float if ml_problem_type == "regression" else int)
+
+        for i, (c, l) in enumerate(zip(class_labels, labels)):
+
+            j = np.nonzero(mlbin.transform(c).sum(0) > 0)
+
+            if ml_problem_type == "classification":
+                l = [1] * len(j)
+
+            y[i, j] = l
+
+        self._labels = y
+
         self.__backref__()
 
     def __getitem__(self, indexer):
@@ -1056,6 +1124,10 @@ class DataSet(Generic):
 
     def __len__(self):
         return len(self.data)
+
+    @property
+    def classes(self):
+        return self._classes
 
     @property
     def data(self):
