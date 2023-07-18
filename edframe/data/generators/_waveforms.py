@@ -419,7 +419,7 @@ class FourierModel(WaveformModel):
         samples = []
 
         for i, label in zip(X, y):
-            sample = HISample(i=i, fs=self._fs, f0=self._f0, labels=[label])
+            sample = HISample(i=i, fs=self._fs, f0=self._f0, labels=[str(label)])
             samples.append(sample)
 
         dataset = HIDataSet(samples)
