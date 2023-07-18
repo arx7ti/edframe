@@ -10,18 +10,18 @@ import math
 import warnings
 import numpy as np
 
+from ..entities import DataSet
+
 
 class Composer:
 
     def __init__(
         self,
-        X: np.ndarray,
-        y: np.ndarray,
+        dataset: DataSet,
         random_state: Optional[int] = None,
     ) -> None:
-        self._X = X
-        self._y = y
-        self._classes = np.unique(y)
+        self._dataset = dataset 
+        # self._classes = np.unique(y)
         self._domains = {}
         for l in self._classes:
             domain = np.argwhere(y == l).ravel().tolist()
