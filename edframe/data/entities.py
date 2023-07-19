@@ -841,6 +841,13 @@ class PowerSample(Generic):
     def labels(self, labels) -> None:
         self._labels = labels
 
+    @property
+    def label(self):
+        if len(self.labels) > 1:
+            raise AttributeError
+
+        return self._labels[0]
+
     # def labels(self):
     #   if abby.is_bearable(self.labels, list[str]):
     #     return self.labels
@@ -1012,6 +1019,16 @@ class HISample(PowerSample):
                          **kwargs)
         self._2d = len(i.shape) == 2
 
+    def __add__(self, sample):
+        return self.agg(sample)
+
+    def __radd__(self, sample):
+        return self.agg(sample)
+
+    def agg(self, sample: HISample) -> HISample:
+        i = self.i + sample.i
+        return self.update(i=i)
+
     def is_2d(self):
         return self._2d
 
@@ -1039,6 +1056,8 @@ class DataSet(Generic):
     events = Events
     features = Features
 
+    # sample = PowerSample
+
     def __init__(self, data) -> None:
         # self._check_fs()
 
@@ -1051,6 +1070,7 @@ class DataSet(Generic):
 
         for s in data:
             # TODO if no labels
+            # TODO if identical labels
             if isinstance(s.labels, dict):
                 _class_labels = list(s.labels.keys())
                 _labels = list(s.labels.values())
@@ -1094,7 +1114,7 @@ class DataSet(Generic):
         else:
             raise ValueError
 
-        y = np.empty((len(data), len(self._class_names)),
+        y = np.zeros((len(data), len(self._class_names)),
                      dtype=float if ml_problem_type == "regression" else int)
 
         for i, (c, l) in enumerate(zip(class_labels, labels)):
@@ -1126,8 +1146,16 @@ class DataSet(Generic):
         return len(self.data)
 
     @property
-    def classes(self):
-        return self._classes
+    def class_names(self):
+        return self._class_names
+
+    @property
+    def n_classes(self):
+        return len(self._class_names)
+
+    @property
+    def labels(self):
+        return self._labels
 
     @property
     def data(self):
@@ -1140,11 +1168,21 @@ class DataSet(Generic):
         else:
             raise ValueError
 
+    @property
+    def fs(self):
+        return self.data[0].fs
+
+    @classmethod
+    def new(cls, samples):
+        return cls(samples)
+
+    def create(self, *args: Any, **kwargs: Any) -> PowerSample:
+        sample_cls = self.data[0].__class__
+        sample = sample_cls(*args, **kwargs)
+        return sample
+
     def count(self):
         return len(self)
-
-    def labels(self):
-        pass
 
     def apply(self, fs):
         data = []

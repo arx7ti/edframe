@@ -1,8 +1,10 @@
 from __future__ import annotations
 
-from typing import Optional
+from tqdm import tqdm
+from operator import add
 from functools import reduce
 from collections import defaultdict
+from typing import Optional, Iterable
 
 import os
 import sys
@@ -20,27 +22,32 @@ class Composer:
         dataset: DataSet,
         random_state: Optional[int] = None,
     ) -> None:
-        self._dataset = dataset 
-        # self._classes = np.unique(y)
-        self._domains = {}
-        for l in self._classes:
-            domain = np.argwhere(y == l).ravel().tolist()
-            self._domains[l] = domain
+        # TODO concat datasets
+        self._dataset = dataset
+        self._domains = []
+        labels = dataset.labels
+
+        if np.any(labels.sum(1) > 1):
+            raise ValueError(
+                "Datasets of stand-alone appliances only are supported")
+
+        for j in range(len(dataset.class_names)):
+            domain = np.argwhere(labels[:, j] == 1).ravel().tolist()
+            self._domains.append(domain)
+
         self._rng_state = random_state
+
         if random_state is not None:
-            seed_shift = round(np.sum(np.std(X, axis=1)))
+            seed_shift = dataset.hash(int)
             modified_seed = random_state + seed_shift
         else:
             modified_seed = random_state
+
         self._rng = np.random.RandomState(modified_seed)
 
     @property
-    def classes(self):
-        return self._classes
-
-    @property
-    def n_classes(self) -> int:
-        return len(self.classes)
+    def dataset(self):
+        return self._dataset
 
     @property
     def domains(self):
@@ -59,104 +66,136 @@ class Composer:
         file_path = os.path.join(self.dir_path, file_name)
         np.save(file_path, data)
 
-    def make_index_set(
+    def sample(
         self,
         n_samples: int = 100,
         n_classes: int = 2,
-        min_freqs: np.ndarray = None,
-        max_freqs: np.ndarray = None,
+        n_reps: int | tuple[int, int] | Iterable = None,
     ):
-        n_combs_max = math.comb(self.n_classes, n_classes)
-        n_combs = min(n_samples, n_combs_max)
+        if n_reps is None:
+            n_reps_min, n_reps_max = 1, 1
+        elif isinstance(n_reps, int):
+            n_reps_min, n_reps_max = n_reps, n_reps
+        elif isinstance(n_reps, tuple):
+            n_reps_min, n_reps_max = n_reps
+        elif isinstance(n_reps, Iterable):
+            n_reps_min, n_reps_max = [], []
+            assert len(n_reps) == self.dataset.n_classes
+
+            for n in n_reps:
+                if isinstance(n, int):
+                    n_min, n_max = n, n
+                elif isinstance(n, tuple):
+                    n_min, n_max = n
+                else:
+                    raise ValueError
+
+                n_reps_min.append(n_min)
+                n_reps_max.append(n_max)
+
+            n_reps_min = np.asarray(n_reps_min)
+            n_reps_max = np.asarray(n_reps_max)
+        else:
+            raise ValueError
+
         Y = set()
+        n_combs_max = math.comb(self.dataset.n_classes, n_classes)
+        n_combs = min(n_samples, n_combs_max)
+        class_indices = list(range(self.dataset.n_classes))
+
         while len(Y) < n_combs:
-            comb = self._rng.choice(self.classes, n_classes, replace=False)
+            comb = self._rng.choice(class_indices, n_classes, replace=False)
             comb = tuple(sorted(comb))
+
             if comb not in Y:
                 Y.add(comb)
+
         Y = list(map(list, Y))
-
-        if min_freqs is None:
-            min_freqs = np.ones(n_classes)
-        if max_freqs is None:
-            max_freqs = np.ones(n_classes)
-
-        F = self._rng.randint(min_freqs,
-                              max_freqs + 1,
-                              size=(n_samples, n_classes))
-
-        n_reps = n_samples // len(Y)
-        n_rem = n_samples % len(Y)
-        rep_distr = np.asarray([n_reps] * len(Y))
-        to_rep = self._rng.choice(range(len(rep_distr)),
-                                  size=n_rem,
-                                  replace=False)
-        rep_distr[to_rep] += 1
-
+        # Repetitions of each appliance
+        R = self._rng.randint(n_reps_min,
+                              n_reps_max + 1,
+                              size=(n_samples, self.dataset.n_classes))
+        # Distribution of samples per combination
+        p = n_samples // len(Y)
+        p = np.asarray([p] * len(Y))
+        c_size = n_samples % len(Y)
+        # Correction for `p`
+        c = self._rng.choice(range(len(p)), size=c_size, replace=False)
+        p[c] += 1
+        # Final set of indices
         I = set()
-        for i, n_rep in enumerate(rep_distr):
-            y = Y[i]
-            f = F[i]
-            D = [self.domains[l] for l in y]
+
+        for y, r, pi in zip(Y, R, p):
+            dj = [(self.domains[j], j) for j in y]
             n_max = reduce(
                 lambda x, y: x * y,
-                [math.comb(len(D[i]) + f[i] - 1, f[i]) for i in range(len(D))])
-
+                # TODO check if r[j] is correct sampling
+                [math.comb(len(djk) + r[j] - 1, r[j]) for djk, j in dj])
             Ii = set()
-            while len(Ii) < min(n_rep, min(n_max, sys.maxsize)):
+
+            while len(Ii) < min(pi, n_max, sys.maxsize):
                 sample = []
-                for domain, freq in zip(D, f):
-                    sample += self._rng.choice(domain, size=freq, replace=True).\
-                                tolist()
+
+                for djk, j in dj:
+                    sample.extend(
+                        self._rng.choice(djk, size=r[j], replace=True))
+
                 sample = tuple(sorted(sample))
+
                 if sample not in Ii:
                     Ii.add(sample)
-            I = I.union(Ii)
 
-        dn = n_samples - len(I)
-        if dn > 0:
+            I |= Ii
+
+        loss = n_samples - len(I)
+
+        if loss > 0:
             warnings.warn('%d samples were not obtained due to '
-                          'combinatorial limit.' % dn)
+                          'combinatorial limit.' % loss)
 
         I = list(map(list, I))
 
         return I
 
-    def compose_single(self, Ii, keep_components: bool = False):
-        Ii = np.asarray(Ii)
-        x = self._X[Ii]
-        y = self.get_labels(Ii)
-        if not keep_components:
-            x = np.sum(x, axis=0)
-            y = np.unique(y)
-        return x, y
-
-    def get_labels(self, Ii):
-        y = self._y[np.asarray(Ii)]
-        return y
+    def compose(self, Ii, keep_components: bool = False):
+        raise NotImplementedError
 
     def make_samples(
         self,
         n_samples: int = 100,
         n_classes: int = 2,
-        min_freqs: np.ndarray = None,
-        max_freqs: np.ndarray = None,
-        dir_path: Optional[str] = None,
+        n_reps: np.ndarray = None,
         keep_components: bool = False,
-        n_jobs: int = 1,
     ):
-        I = self.make_index_set(n_samples=n_samples,
-                                n_classes=n_classes,
-                                min_freqs=min_freqs,
-                                max_freqs=max_freqs)
-        if dir_path is None:
-            X = []
-            Y = []
-            for Ii in I:
-                x, y = self.compose_single(Ii, keep_components=keep_components)
-                X.append(x)
-                Y.append(y)
-        else:
-            # TODO parallel
-            pass
-        return X, Y
+        samples = []
+        I = self.sample(n_samples=n_samples,
+                        n_classes=n_classes,
+                        n_reps=n_reps)
+
+        for Ii in tqdm(I):
+            sample = self.compose(Ii, keep_components=keep_components)
+            samples.append(sample)
+
+        dataset = self.dataset.new(samples)
+
+        return dataset
+
+
+class HComposer(Composer):
+
+    def compose(self, Ii, keep_components: bool = False):
+        components = [self.dataset[i] for i in Ii]
+        values = reduce(add, components).values
+        print(len(components))
+        labels = [sample.label for sample in components]
+        print(labels)
+        print('----------------')
+        args = (values, self.dataset.fs)
+        kwargs = {"labels": labels}
+
+        if keep_components:
+            kwargs.update(components=components)
+
+        sample = self.dataset.create(*args, **kwargs)
+
+        return sample
