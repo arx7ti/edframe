@@ -1231,6 +1231,10 @@ class DataSet(Generic):
 
         return self.new(data_train), self.new(data_test)
 
+    def align(self):
+        # TODO align lengths?
+        pass
+
     # TODO
     # def map(self, fs):
     #     data = []
