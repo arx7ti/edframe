@@ -298,8 +298,8 @@ class ROI:
             # TODO the same style for feature extraction
             roi = []
 
-            for _x in x.values:
-                roi.append(_crop(_x, self._detectors))
+            for _x in x.data:
+                roi.extend(_crop(_x, self._detectors))
 
             dataset = x.__class__(roi)
 
