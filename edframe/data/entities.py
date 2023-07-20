@@ -13,6 +13,7 @@ from beartype.typing import Iterable
 from sklearn.base import BaseEstimator
 from sklearn.utils.validation import check_is_fitted
 from sklearn.exceptions import NotFittedError
+from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import MultiLabelBinarizer
 from typing import Optional, Callable, Union, Any, Iterable
 
@@ -455,6 +456,8 @@ class Features(BackrefDataFrame):
 
             X = fn.transform(X if is_dataset else X[None])
             do_iters = False
+        elif is_estimator and not is_array:
+            raise ValueError
         elif is_array and is_dataset:
             # TODO axis support
             X = np.apply_along_axis(fn, axis=1, arr=X, *args, **kwargs)
@@ -1058,6 +1061,37 @@ class DataSet(Generic):
 
     # sample = PowerSample
 
+    @property
+    def class_names(self):
+        return self._class_names
+
+    @property
+    def n_classes(self):
+        return len(self._class_names)
+
+    @property
+    def labels(self):
+        return self._labels
+
+    @property
+    def data(self):
+        return self._data
+
+    @data.setter
+    def data(self, data):
+        if isinstance(data, list):
+            self._data = data
+        else:
+            raise ValueError
+
+    @property
+    def fs(self):
+        return self.data[0].fs
+
+    @property
+    def values(self):
+        return self.source("values")
+
     def __init__(self, data) -> None:
         # self._check_fs()
 
@@ -1145,33 +1179,6 @@ class DataSet(Generic):
     def __len__(self):
         return len(self.data)
 
-    @property
-    def class_names(self):
-        return self._class_names
-
-    @property
-    def n_classes(self):
-        return len(self._class_names)
-
-    @property
-    def labels(self):
-        return self._labels
-
-    @property
-    def data(self):
-        return self._data
-
-    @data.setter
-    def data(self, data):
-        if isinstance(data, list):
-            self._data = data
-        else:
-            raise ValueError
-
-    @property
-    def fs(self):
-        return self.data[0].fs
-
     @classmethod
     def new(cls, samples):
         return cls(samples)
@@ -1209,9 +1216,20 @@ class DataSet(Generic):
 
         return values
 
-    @property
-    def values(self):
-        return self.source("values")
+    def is_standalone(self):
+        return np.all(self.labels.sum(0) / self.n_classes == 1)
+
+    def train_test_split(self, test_size: float = 0.3):
+        if self.is_standalone():
+            stratify = np.nonzero(self.labels > 0)[1]
+        else:
+            stratify = self.labels.sum(1)
+
+        data_train, data_test = train_test_split(self.data,
+                                                 test_size=test_size,
+                                                 stratify=stratify)
+
+        return self.new(data_train), self.new(data_test)
 
     # TODO
     # def map(self, fs):
