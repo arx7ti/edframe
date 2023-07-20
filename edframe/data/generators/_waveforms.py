@@ -399,7 +399,7 @@ class FourierModel(WaveformModel):
         X = np.sum(X, axis=1)
         # print((1 + np.exp(-gamma * self._t_axis[None])).min(),
         #       (1 + np.exp(-gamma * self._t_axis[None]).max()))
-        X *= 1 - np.exp(-gamma * self._t_axis[None])
+        X *= 1 + np.exp(-gamma * self._t_axis[None])
         if squeeze:
             X = X[0]
         return X
