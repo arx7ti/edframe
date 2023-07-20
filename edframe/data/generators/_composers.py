@@ -186,10 +186,7 @@ class HComposer(Composer):
     def compose(self, Ii, keep_components: bool = False):
         components = [self.dataset[i] for i in Ii]
         values = reduce(add, components).values
-        print(len(components))
         labels = [sample.label for sample in components]
-        print(labels)
-        print('----------------')
         args = (values, self.dataset.fs)
         kwargs = {"labels": labels}
 
