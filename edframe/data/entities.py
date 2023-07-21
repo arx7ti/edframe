@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 # import torch
+import random
 import inspect
 import numpy as np
 import pandas as pd
@@ -17,7 +18,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import MultiLabelBinarizer
 from typing import Optional, Callable, Union, Any, Iterable
 
-from edframe.signals import F
+from edframe.signals import F, pad, extrapolate, replicate, enhance, crop
 
 
 class Generic:
@@ -931,15 +932,36 @@ class PowerSample(Generic):
     def set_source(self, source_name: str, source_values: Any):
         setattr(self, source_name, source_values)
 
-    def crop(self, a=None, b=None, roi=None) -> list[PowerSample]:
+    def roi(self, a=None, b=None, roi=None) -> list[PowerSample]:
         if a is not None and b is not None:
             return self[a:b]
 
         if roi is not None:
             return roi.crop(self)
 
+    def crop(self, a: int, b: int) -> PowerSample:
+        data = crop(self.data, a, b)
+        return self.update(data=data)
 
-class VISample(PowerSample):
+    def random_crop(self, dn: int) -> PowerSample:
+        a = random.randint(0, dn - 1)
+        b = a + dn
+        return self.crop(a, b)
+
+    def replicate(self, n: int) -> PowerSample:
+        data = replicate(self.data, n)
+        return self.update(data=data)
+
+    def pad(self, n: int) -> PowerSample:
+        data = pad(self.data, n)
+        return self.update(data=data)
+
+    def extrapolate(self, n: int, lags: int = 10) -> PowerSample:
+        data = extrapolate(self.data, n, lags=lags)
+        return self.update(data=data)
+
+
+class VI(PowerSample):
     __high__ = True
 
     def __init__(
@@ -999,7 +1021,7 @@ class VISample(PowerSample):
         self.i = i
 
 
-class HISample(PowerSample):
+class I(PowerSample):
     __high__ = True
 
     def __init__(
@@ -1028,7 +1050,7 @@ class HISample(PowerSample):
     def __radd__(self, sample):
         return self.agg(sample)
 
-    def agg(self, sample: HISample) -> HISample:
+    def agg(self, sample: I) -> I:
         i = self.i + sample.i
         return self.update(i=i)
 
@@ -1092,7 +1114,7 @@ class DataSet(Generic):
     def values(self):
         return self.source("values")
 
-    def __init__(self, data) -> None:
+    def __init__(self, data, random_seed: Optional[int] = None) -> None:
         # self._check_fs()
 
         self._data = data
@@ -1161,6 +1183,7 @@ class DataSet(Generic):
             y[i, j] = l
 
         self._labels = y
+        self._rng = np.random.RandomState(random_seed)
 
         self.__backref__()
 
@@ -1231,9 +1254,34 @@ class DataSet(Generic):
 
         return self.new(data_train), self.new(data_test)
 
-    def align(self):
-        # TODO align lengths?
-        pass
+    def align(self, n: int, if_less="pad", if_more="crop"):
+        if if_less not in ["pad", "extrapolate", "replicate", "drop"]:
+            raise ValueError
+
+        if if_more not in ["crop", "rcrop", "drop"]:
+            raise ValueError
+
+        samples = []
+
+        for sample in self.data:
+            dn = n - len(sample)
+
+            if dn < 0 and if_less == "pad":
+                sample = sample.pad((0, dn))
+            elif dn < 0 and if_less == "extrapolate":
+                sample = sample.extrapolate((0, dn))
+            elif dn < 0 and if_less == "replicate":
+                sample = sample.replicate((0, dn))
+            elif dn > 0 and if_more == "crop":
+                sample = sample.crop(0, n - dn)
+            if dn > 0 and if_more == "rcrop":
+                sample = sample.crop(a, b)
+            else:
+                continue
+
+            samples.append(sample)
+
+        return self.new(samples)
 
     # TODO
     # def map(self, fs):

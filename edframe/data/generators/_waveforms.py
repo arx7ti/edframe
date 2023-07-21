@@ -9,7 +9,7 @@ import numpy as np
 # Internal packages
 from ... import utils
 from ... import signals
-from ..entities import HISample, HIDataSet
+from ..entities import I, HIDataSet
 
 
 class WaveformModel:
@@ -419,7 +419,7 @@ class FourierModel(WaveformModel):
         samples = []
 
         for i, label in zip(X, y):
-            sample = HISample(i=i, fs=self._fs, f0=self._f0, labels=[str(label)])
+            sample = I(i=i, fs=self._fs, f0=self._f0, labels=[str(label)])
             samples.append(sample)
 
         dataset = HIDataSet(samples)
