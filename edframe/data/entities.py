@@ -7,6 +7,7 @@ import numpy as np
 import pandas as pd
 import itertools as it
 
+from tqdm import tqdm
 from beartype import abby
 from copy import deepcopy
 from collections import defaultdict
@@ -18,7 +19,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import MultiLabelBinarizer
 from typing import Optional, Callable, Union, Any, Iterable
 
-from edframe.signals import F, pad, extrapolate, replicate, enhance, crop
+from edframe.signals import F, pad, roll, extrapolate, replicate, enhance, crop
 
 
 class Generic:
@@ -944,16 +945,31 @@ class PowerSample(Generic):
         return self.update(data=data)
 
     def random_crop(self, dn: int) -> PowerSample:
+        if dn < 0:
+            raise ValueError
+
         a = random.randint(0, dn - 1)
         b = a + dn
         return self.crop(a, b)
 
-    def replicate(self, n: int) -> PowerSample:
-        data = replicate(self.data, n)
-        return self.update(data=data)
-
     def pad(self, n: int) -> PowerSample:
         data = pad(self.data, n)
+        return self.update(data=data)
+
+    def roll(self, n: int) -> PowerSample:
+        data = roll(self.data, n)
+        return self.update(data=data)
+
+    def enhance(self, fs: int, kind: str = "linear") -> PowerSample:
+        if fs < self.fs:
+            raise ValueError
+
+        data = enhance(self.data, fs, kind=kind)
+
+        return self.update(data=data, fs=fs)
+
+    def replicate(self, n: int) -> PowerSample:
+        data = replicate(self.data, n)
         return self.update(data=data)
 
     def extrapolate(self, n: int, lags: int = 10) -> PowerSample:
@@ -1254,29 +1270,39 @@ class DataSet(Generic):
 
         return self.new(data_train), self.new(data_test)
 
-    def align(self, n: int, if_less="pad", if_more="crop"):
+    def align(
+        self,
+        n: int = None,
+        if_less: str = "pad",
+        if_more: str = "crop",
+    ) -> DataSet:
         if if_less not in ["pad", "extrapolate", "replicate", "drop"]:
             raise ValueError
 
-        if if_more not in ["crop", "rcrop", "drop"]:
+        if if_more not in ["crop", "random_crop", "drop"]:
             raise ValueError
+
+        if n is None:
+            ls = [len(s) for s in self.data]
+            ls, cs = np.unique(ls, return_counts=True)
+            n = ls[np.argmax(cs)]
 
         samples = []
 
-        for sample in self.data:
+        for sample in tqdm(self.data):
             dn = n - len(sample)
 
-            if dn < 0 and if_less == "pad":
+            if dn > 0 and if_less == "pad":
                 sample = sample.pad((0, dn))
-            elif dn < 0 and if_less == "extrapolate":
+            elif dn > 0 and if_less == "extrapolate":
                 sample = sample.extrapolate((0, dn))
-            elif dn < 0 and if_less == "replicate":
+            elif dn > 0 and if_less == "replicate":
                 sample = sample.replicate((0, dn))
-            elif dn > 0 and if_more == "crop":
-                sample = sample.crop(0, n - dn)
-            if dn > 0 and if_more == "rcrop":
-                sample = sample.crop(a, b)
-            else:
+            elif dn < 0 and if_more == "crop":
+                sample = sample.crop(0, n)
+            elif dn < 0 and if_more == "random_crop":
+                sample = sample.random_crop(abs(dn))
+            elif dn != 0:
                 continue
 
             samples.append(sample)
