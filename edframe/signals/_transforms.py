@@ -42,6 +42,7 @@ def pad(
     n: int | tuple[int, int],
     axis: int = -1,
 ) -> np.ndarray:
+    # TODO pad with values
     if isinstance(n, int):
         a, b = 0, n
     else:
@@ -59,39 +60,15 @@ def pad(
     return x
 
 
-def roll(
-    x: np.ndarray,
-    n_periods: int,
-    mode: str = 'constant',
-    **kwargs: Any,
-) -> np.ndarray:
-    if n_periods > 0:
-        slicer = np.s_[:n_periods]
-    elif n_periods < 0:
-        slicer = np.s_[n_periods:]
-    else:
-        slicer = None
-
-    if slicer is not None:
-        x = np.roll(x, n_periods, axis=-2)
-
-        if mode == 'constant':
-            fill_values = kwargs.get('constant_value', 0)
-        elif mode == 'noise':
-            mean = kwargs.get('mean', 0)
-            std = kwargs.get('std', 1)
-            fill_values = np.random.randn(*x.shape[:-2], abs(n_periods),
-                                          x.shape[-1])
-            fill_values = mean + std * fill_values.astype(x.dtype)
-        else:
-            raise ValueError
-
-        x[slicer] = fill_values
-
+def roll(x: np.ndarray, n: int) -> np.ndarray:
+    x = np.roll(x, n)
     return x
 
 
 def crop(x: np.ndarray, a: int, b: int, axis=-1) -> np.ndarray:
+    if a < 0 or b < 0:
+        raise ValueError
+
     if b <= a:
         raise ValueError
 
