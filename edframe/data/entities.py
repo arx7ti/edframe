@@ -490,10 +490,13 @@ class Features(BackrefDataFrame):
         return X, column_names
 
     def extract(self, fns: Callable | Iterable[Callable]) -> BackrefDataFrame:
+        if not isinstance(fns, Iterable):
+            fns = [fns]
+
         columns = []
         values = []
 
-        for fn in fns if isinstance(fns, Iterable) else [fns]:
+        for fn in fns:
             X, column_names = self._compute_feature(fn)
 
             values.append(X)
