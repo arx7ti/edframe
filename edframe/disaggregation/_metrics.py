@@ -46,7 +46,7 @@ class Metric:
 
             return scores
 
-        score = f1_score(y_true, y_pred, **self._kwargs)
+        score = self.metric(y_true, y_pred, **self._kwargs)
 
         return score
 
