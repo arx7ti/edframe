@@ -134,50 +134,53 @@ class FeatureEstimator(Feature):
         raise NotImplementedError
 
 
-def CustomFeature(
+class CustomFeature:
+
+    def __new__(
+    cls,
     feature: callable | BaseEstimator,
     source_name: Optional[str] = None,
     verbose_name: Optional[str] = None,
     **kwargs,
 ) -> Feature | FeatureEstimator:
-    estimator = {}
-    msg = "Argument `feature` takes only function or BaseEstimator class"
+        estimator = {}
+        msg = "Argument `feature` takes only function or BaseEstimator class"
 
-    if isinstance(feature, BaseEstimator):
-        # TODO make dynamic handling
-        raise ValueError(msg)
-
-    if isinstance(feature, FunctionType):
-
-        def _feature(_, x):
-            # TODO check arguments
-            return feature(x)
-
-        f = Feature.__new__(Feature)
-        bound_method = _feature.__get__(f, Feature)
-
-    elif isclass(feature):
-        if not issubclass(feature, BaseEstimator):
+        if isinstance(feature, BaseEstimator):
+            # TODO make dynamic handling
             raise ValueError(msg)
 
-        def _feature(_, **kwargs):
-            return feature(**kwargs)
+        if isinstance(feature, FunctionType):
 
-        f = FeatureEstimator.__new__(FeatureEstimator)
-        bound_method = _feature.__get__(f, FeatureEstimator)
-        estimator.update(estimator=_feature(feature, **kwargs))
-    else:
-        raise ValueError(msg)
+            def _feature(_, x):
+                # TODO check arguments
+                return feature(x)
 
-    if verbose_name is None:
-        verbose_name = feature.__name__
+            f = Feature.__new__(Feature)
+            bound_method = _feature.__get__(f, Feature)
 
-    f.__dict__.update(**estimator,
-                      _verbose_name=verbose_name,
-                      _source_name=source_name)
-    setattr(f, "feature", bound_method)
+        elif isclass(feature):
+            if not issubclass(feature, BaseEstimator):
+                raise ValueError(msg)
 
-    return f
+            def _feature(_, **kwargs):
+                return feature(**kwargs)
+
+            f = FeatureEstimator.__new__(FeatureEstimator)
+            bound_method = _feature.__get__(f, FeatureEstimator)
+            estimator.update(estimator=_feature(feature, **kwargs))
+        else:
+            raise ValueError(msg)
+
+        if verbose_name is None:
+            verbose_name = feature.__name__
+
+        f.__dict__.update(**estimator,
+                        _verbose_name=verbose_name,
+                        _source_name=source_name)
+        setattr(f, "feature", bound_method)
+
+        return f
 
 
 class PrincipalComponents(FeatureEstimator):
