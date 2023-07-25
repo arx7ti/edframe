@@ -41,12 +41,12 @@ class Metric:
 
             for n in n_comps:
                 mask = y_true.sum(1) == n
-                score = self.metric(y_true[mask], y_pred[mask], **self._kwargs)
+                score = self.metric(y_true[mask], y_pred[mask])
                 scores.append(score)
 
             return scores
 
-        score = self.metric(y_true, y_pred, **self._kwargs)
+        score = self.metric(y_true, y_pred)
 
         return score
 
