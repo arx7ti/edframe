@@ -251,10 +251,13 @@ class WaveformModel:
             else:
                 count = np.floor(w / n_cpc * n_samples)
                 counts = np.asarray([count] * n_cpc)
+
             counts = counts.astype(int)
+
             if np.any(counts == 0):
                 # TODO msg
                 raise ValueError('Try to increase number of samples.')
+
             n_spc_distr.append(counts)
 
         n_spc_distr = np.concatenate(n_spc_distr)
@@ -264,6 +267,7 @@ class WaveformModel:
         P = []
         l, u = zip(*self.bounds.values())
         l, u = np.asarray(l), np.asarray(u)
+
         for n_spc, locs in zip(n_spc_distr, centers):
             a, b = (l - locs) / std, (u - locs) / std
             rvs = truncnorm.rvs(a,
@@ -273,6 +277,7 @@ class WaveformModel:
                                 size=(n_spc, len(locs)),
                                 random_state=self._rng_state)
             P.append(rvs)
+
         P = np.concatenate(P)
         y = np.repeat(np.repeat(classes, n_cpc_distr), n_spc_distr)
 
