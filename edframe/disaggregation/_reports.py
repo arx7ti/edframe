@@ -5,16 +5,14 @@ import inspect
 import numpy as np
 import pandas as pd
 
-from ..data.entities import DataSet
-from ._generics import Disaggregator
-from ._metrics import Metric
+from .metrics import Metric
 
 
 class Report:
 
     def __init__(self, metrics: Iterable['Metric' | 'Callable']) -> None:
         self._metrics = metrics
-        self._columns = []
+        self._columns = ["Model"]
 
         for metric in metrics:
             if isinstance(metric, Metric):
@@ -28,19 +26,29 @@ class Report:
 
     def __call__(
         self,
-        models: Iterable['Disaggregator'],
-        dataset: DataSet,
+        models: Iterable,
+        X: np.ndarray,
+        y: np.ndarray,
     ) -> pd.DataFrame:
         metrics = []
-        y_true = dataset.labels
 
         for model in models:
-            model_metrics = []
+            model_name = model.__class__.__name__
+            model_metrics = [model_name]
+
+            if hasattr(model, "predict"):
+                y_pred = model.predict(X)
+            elif hasattr(model, "transform"):
+                y_pred = model.transform(X)
+            elif callable(model):
+                y_pred = model(X)
+            else:
+                raise ValueError("Model should be callable or have one of the methods "\
+                                    "`predict` or `transform`")
 
             for metric in self._metrics:
-                y_pred = model.disaggregate(dataset)
                 # TODO wrapper for **kwargs
-                metric = metric(y_true, y_pred)
+                metric = metric(y, y_pred)
                 model_metrics.append(metric)
 
             metrics.append(model_metrics)
