@@ -137,12 +137,12 @@ class FeatureEstimator(Feature):
 class CustomFeature:
 
     def __new__(
-    cls,
-    feature: callable | BaseEstimator,
-    source_name: Optional[str] = None,
-    verbose_name: Optional[str] = None,
-    **kwargs,
-) -> Feature | FeatureEstimator:
+        cls,
+        feature: callable | BaseEstimator,
+        source_name: Optional[str] = None,
+        verbose_name: Optional[str] = None,
+        **kwargs,
+    ) -> Feature | FeatureEstimator:
         estimator = {}
         msg = "Argument `feature` takes only function or BaseEstimator class"
 
@@ -176,8 +176,8 @@ class CustomFeature:
             verbose_name = feature.__name__
 
         f.__dict__.update(**estimator,
-                        _verbose_name=verbose_name,
-                        _source_name=source_name)
+                          _verbose_name=verbose_name,
+                          _source_name=source_name)
         setattr(f, "feature", bound_method)
 
         return f
@@ -187,9 +187,3 @@ class PrincipalComponents(FeatureEstimator):
 
     def feature(self, **kwargs) -> PCA:
         return PCA(**kwargs)
-
-
-class IndependentComponents(FeatureEstimator):
-
-    def feature(self, **kwargs) -> FastICA:
-        return FastICA(**kwargs)
