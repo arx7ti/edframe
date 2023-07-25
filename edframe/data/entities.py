@@ -1102,8 +1102,7 @@ class DataSet(Generic):
         if cn_dtype is not str:
             raise TypeError("Class names must be str")
 
-        mlbin = MultiLabelBinarizer()
-        mlbin.fit(self._class_names)
+        mlbin = MultiLabelBinarizer(classes=list(self._class_names))
         dtype = dtypes.pop()
 
         if dtype is str:
@@ -1120,7 +1119,7 @@ class DataSet(Generic):
 
         for i, (c, l) in enumerate(zip(class_labels, labels)):
 
-            j = np.nonzero(mlbin.transform(c).sum(0) > 0)
+            j = np.nonzero(mlbin.fit_transform([c]).ravel() > 0)
 
             if problem_type == "classification":
                 l = [1] * len(j)
