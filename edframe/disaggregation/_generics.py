@@ -8,39 +8,15 @@ import numpy as np
 
 class Disaggregator:
 
-    def __init__(self, problem_type: str = "classification", **kwargs) -> None:
-        self._problem_type = problem_type
-        self.model = self.disaggregator(**kwargs)
+    def __init__(self) -> None:
+        self.model = None
         self._from_features = None
 
-    def disaggregator(self, **kwargs):
+    def fit(self, *args, **kwargs):
         raise NotImplementedError
 
-    def fit(self, d: DataSet, from_features: bool = True) -> None:
-        # TODO if torch
-        if not hasattr(self.model, "fit"):
-            raise AttributeError("Disaggregator must have a fit attribute")
-
-        self._from_features = from_features
-
-        if from_features:
-            x = d.features.values
-        else:
-            x = d.values
-
-        y = d.labels
-
-        if self._problem_type in ["classification", "ranking"] and\
-            not np.issubdtype(y.dtype, int):
-
-            raise ValueError
-
-        if self._problem_type == "regression" and\
-            not np.issubdtype(y.dtype, float):
-
-            raise ValueError
-
-        self.model.fit(x, y)
+    def tune(self):
+        raise NotImplementedError
 
     def disaggregate(self, d: DataSet):
         # TODO if single sample
@@ -55,7 +31,37 @@ class Disaggregator:
         return y
 
 
-class RFAppIdentifier(Disaggregator):
+class Classifier(Disaggregator):
 
-    def disaggregator(self, **kwargs):
+    def __init__(self, **kwargs) -> None:
+        super().__init__()
+        self.model = self.classifier(**kwargs)
+
+    def classifier(self, **kwargs):
+        raise NotImplementedError
+
+
+class Regressor(Disaggregator):
+
+    def __init__(self, **kwargs) -> None:
+        super().__init__()
+        self.model = self.regressor(**kwargs)
+
+    def regressor(self, **kwargs):
+        raise NotImplementedError
+
+
+class Ranker(Disaggregator):
+
+    def __init__(self, **kwargs) -> None:
+        super().__init__()
+        self.model = self.ranker(**kwargs)
+
+    def ranker(self, **kwargs):
+        raise NotImplementedError
+
+
+class RFAppIdentifier(Classifier):
+
+    def classifier(self, **kwargs):
         return RandomForestClassifier(**kwargs)
