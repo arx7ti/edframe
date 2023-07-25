@@ -395,10 +395,14 @@ class Features(BackrefDataFrame):
         else:
             raise ValueError
 
+    @property
+    def values(self) -> np.ndarray:
+        return self.data.values
+
     def __call__(self, fns: Callable | Iterable[Callable]) -> BackrefDataFrame:
         return self.extract(fns)
 
-    def add(self, features: Union[Events, Features]) -> Features:
+    def add(self, features: Events | Features) -> Features:
 
         if self.backref == features.backref:
             if isinstance(features, Events):
@@ -1103,22 +1107,22 @@ class DataSet(Generic):
         dtype = dtypes.pop()
 
         if dtype is str:
-            ml_problem_type = "classification"
+            problem_type = "classification"
         elif dtype is float:
-            ml_problem_type = "regression"
+            problem_type = "regression"
         elif dtype is int:
-            ml_problem_type = "ranking"
+            problem_type = "ranking"
         else:
             raise ValueError
 
         y = np.zeros((len(data), len(self._class_names)),
-                     dtype=float if ml_problem_type == "regression" else int)
+                     dtype=float if problem_type == "regression" else int)
 
         for i, (c, l) in enumerate(zip(class_labels, labels)):
 
             j = np.nonzero(mlbin.transform(c).sum(0) > 0)
 
-            if ml_problem_type == "classification":
+            if problem_type == "classification":
                 l = [1] * len(j)
 
             y[i, j] = l
