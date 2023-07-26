@@ -948,6 +948,18 @@ class VI(PowerSample):
                          **kwargs)
         self._2d = len(v.shape) == len(i.shape) == 2
 
+    def __add__(self, sample):
+        return self.agg(sample)
+
+    def __radd__(self, sample):
+        return self.agg(sample)
+
+    def agg(self, sample: VI) -> VI:
+        # TODO fix v update as well during transform
+        v = np.mean((self.v, sample.v), axis=0)
+        i = self.i + sample.i
+        return self.update(v=v, i=i)
+
     def is_2d(self):
         return self._2d
 
