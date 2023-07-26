@@ -165,9 +165,7 @@ class PLAID(Reader):
         if key.endswith('s'):
             y, locs = self._get_targets(apps_meta, len(i))
             return v, i, fs, y, locs
-        else:
-            app_meta = apps_meta
-            y = self._get_target(app_meta)
-            return v, i, fs, y
 
-        # power_sample = PowerSample(y, fs, fs_type="high", locs=locs, v=v, i=i)
+        app_meta = apps_meta
+        y = self._get_target(app_meta)
+        return v, i, fs, y
