@@ -42,7 +42,6 @@ class Metric:
                 mask = y_true.sum(1) == n
 
                 if np.any(mask):
-                    print(y_true[mask].shape, y_pred[mask].shape)
                     score = self.metric(y_true[mask], y_pred[mask])
                     scores.update({n: score})
 
