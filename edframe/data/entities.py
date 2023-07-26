@@ -19,7 +19,6 @@ import itertools as it
 
 
 class Generic:
-
     @classmethod
     def new(cls, *args, **kwargs):
         return cls(*args, **kwargs)
@@ -57,6 +56,7 @@ class Generic:
                 v = kwargs[p]
                 kwargs.pop(p)
             else:
+                # TODO time & memory tests
                 v = copy(v)
 
             state_dict.update({p: v})
@@ -158,7 +158,6 @@ class Backref(Generic):
 
 
 class AttributeExtractors(Backref):
-
     @property
     def values(self):
         values = [getattr(self, n) for n in self.names]
@@ -335,7 +334,6 @@ class BackrefDataFrame(Backref):
 
 # TODO not DataFrame, but dict[timestamp, list[event.verbose_name]]
 class Events(Backref):
-
     @property
     def data(self) -> pd.DataFrame:
         return self._data
@@ -425,19 +423,15 @@ class Features(BackrefDataFrame):
 
         dfs = []
 
-        print("EXTRACTING")
         for fn in fns:
             # TODO Must be feature
             df = fn(self.backref)
             dfs.append(df)
             del df
 
-        print("DONE")
         df = pd.concat(dfs, axis=1)
 
-        print("UPDATING")
         d = self.update(data=df, _extractors=list(fns))
-        print("DONE\n")
         return d
         # TODO prop estimators
 
@@ -579,7 +573,6 @@ class LockedError(Exception):
 
 
 class GenericState:
-
     def __init__(self) -> None:
         self._locked = False
         self._msg = ""
@@ -615,10 +608,8 @@ class PowerSample(Generic):
     __high__: bool = False
 
     class State(GenericState):
-
         @classmethod
         def check(cls, method: Callable):
-
             def wrapper(self, *args, **kwargs):
                 if not issubclass(self.__class__, PowerSample):
                     raise ValueError("Argument \"self\" is required")
@@ -643,7 +634,6 @@ class PowerSample(Generic):
 
         @classmethod
         def check_init_args(cls, method):
-
             def wrapper(*args, **kwargs):
                 labels = kwargs.get("labels", None)
                 appliances = kwargs.get("appliances", None)
@@ -809,17 +799,20 @@ class PowerSample(Generic):
         if not isinstance(ab, slice):
             raise ValueError
 
-        values = self.values[ab]
+        data = self.data[..., ab]
         components = self.components
         locs = self.locs
+
         # TODO
         if components.count() > 0:
-            components = components[:, ab]
+            components = components[..., ab]
+
         if locs is not None:
             a = 0 if ab.start is None else ab.start
-            b = len(values) - a if ab.stop is None else ab.stop
+            b = data.shape[-1] - a if ab.stop is None else ab.stop
             locs = np.clips(locs, a_min=a, a_max=b - 1)
-        return self.update(values=values, _locs=locs, _components=components)
+
+        return self.update(data=data, _locs=locs, _components=components)
 
     @State.check
     def apply(
@@ -935,8 +928,11 @@ class VI(PowerSample):
         aggregation: Optional[str] = '+',
         **kwargs: Any,
     ):
-        # TODO RESTRICT data should be ndarray only
-        super().__init__(data=[v, i],
+        if len(v) != len(i):
+            raise ValueError
+
+        data = np.stack((v, i), axis=0)
+        super().__init__(data=data,
                          fs=fs,
                          fs_type="high",
                          f0=f0,
@@ -958,7 +954,8 @@ class VI(PowerSample):
         # TODO fix v update as well during transform
         v = np.mean((self.v, sample.v), axis=0)
         i = self.i + sample.i
-        return self.update(v=v, i=i)
+        labels = self.labels + sample.labels
+        return self.update(v=v, i=i, labels=labels)
 
     def is_2d(self):
         return self._2d
@@ -991,15 +988,15 @@ class VI(PowerSample):
     def values(self, i: np.ndarray):
         self.i = i
 
-    def crop(self, a, b):
-        v = crop(self.v, a, b)
-        i = crop(self.i, a, b)
-        return self.update(data=[v, i])
+    # def crop(self, a, b):
+    #     v = crop(self.v, a, b)
+    #     i = crop(self.i, a, b)
+    #     return self.update(data=[v, i])
 
-    def downsample(self, fs: int) -> PowerSample:
-        v = downsample(self.v, self.fs, fs)
-        i = downsample(self.i, self.fs, fs)
-        return self.update(v=v, i=i, fs=fs)
+    # def downsample(self, fs: int) -> PowerSample:
+    #     v = downsample(self.v, self.fs, fs)
+    #     i = downsample(self.i, self.fs, fs)
+    #     return self.update(v=v, i=i, fs=fs)
 
 
 class I(PowerSample):
@@ -1033,7 +1030,8 @@ class I(PowerSample):
 
     def agg(self, sample: I) -> I:
         i = self.i + sample.i
-        return self.update(i=i)
+        labels = self.labels + sample.labels
+        return self.update(i=i, labels=labels)
 
     def is_2d(self):
         return self._2d

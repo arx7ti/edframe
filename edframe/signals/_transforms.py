@@ -13,12 +13,18 @@ def identity(x: np.ndarray):
     return x
 
 
-def downsample(x: np.ndarray, fs0: int, fs: int) -> np.ndarray:
-    n_samples = round(len(x) / fs0 * fs)
-    # n1/fs1=n2/fs2
-    # n2=n1/fs1*fs2
-    assert n_samples < len(x)
-    x = resample(x, n_samples)
+def downsample(x: np.ndarray, fs0: int, fs: int, axis: int = -1) -> np.ndarray:
+    n = x.shape[-1]
+    n_new = round(n / fs0 * fs)
+    assert n_new < n 
+
+    if axis < 0:
+        axis = len(x.shape) + axis
+
+    if axis >= len(x.shape):
+        raise ValueError
+
+    x = resample(x, n_new, axis=axis)
 
     return x
 
@@ -28,15 +34,17 @@ def enhance(
     fs0: int,
     fs: int,
     kind: str = 'linear',
+    axis: int = -1,
 ) -> np.ndarray:
-    n_samples = round(len(x) / fs0 * fs)
-    assert n_samples > len(x)
+    n = x.shape[-1]
+    n_new = round(n / fs0 * fs)
+    assert n_new > n 
 
-    t0 = np.linspace(0, 1, len(x), dtype=x.dtype)
-    t1 = np.linspace(0, 1, n_samples, dtype=x.dtype)
+    t0 = np.linspace(0, 1, n, dtype=x.dtype)
+    t1 = np.linspace(0, 1, n_new, dtype=x.dtype)
     mean = x.mean(keepdims=True)
     x = x - mean
-    enhancer = interp1d(t0, x, kind=kind, axis=-1)
+    enhancer = interp1d(t0, x, kind=kind, axis=axis)
     x = enhancer(t1)
     x += mean
 
@@ -66,8 +74,8 @@ def pad(
     return x
 
 
-def roll(x: np.ndarray, n: int) -> np.ndarray:
-    x = np.roll(x, n)
+def roll(x: np.ndarray, n: int, axis: int = -1) -> np.ndarray:
+    x = np.roll(x, n, axis=axis)
     return x
 
 
@@ -142,7 +150,6 @@ def extrapolate(x: np.ndarray, n: int, lags: int) -> np.ndarray:
 
 
 class F:
-
     def __init__(self, fn: Callable, map_out_args, **map_in_args) -> None:
 
         if len(map_out_args) == 0:
