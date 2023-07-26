@@ -299,12 +299,10 @@ class ROI:
             for _x in tqdm(x.data):
                 roi.extend(_crop(_x, self._detectors))
 
-            dataset = x.__class__(roi)
+            dataset = x.new(roi)
 
             return dataset
 
         roi = _crop(x, self._detectors)
 
         return roi
-
-        # return _crop(x, self._detectors)
