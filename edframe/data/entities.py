@@ -1226,6 +1226,7 @@ class DataSet(Generic):
         train, test = train_test_split(range(self.count()),
                                        test_size=test_size,
                                        stratify=stratify)
+        # Two lines below extremely slow
         X_train = [self.data[i] for i in train]
         X_test = [self.data[i] for i in test]
         Y_train = self._labels[train]
