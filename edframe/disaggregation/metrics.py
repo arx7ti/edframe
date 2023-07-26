@@ -8,7 +8,6 @@ import numpy as np
 
 
 class Metric:
-
     @property
     def verbose_name(self):
         if self._verbose_name is None:
@@ -34,15 +33,18 @@ class Metric:
 
     def compute(self, y_true: np.ndarray, y_pred: np.ndarray):
         if self.is_componentwise():
-            scores = []
+            scores = {}
             n_true_comps = np.unique(y_true.sum(1))
             n_pred_comps = np.unique(y_pred.sum(1))
-            n_comps = np.unique(np.concatenate(n_true_comps, n_pred_comps))
+            n_comps = np.unique(np.concatenate((n_true_comps, n_pred_comps)))
 
             for n in n_comps:
                 mask = y_true.sum(1) == n
-                score = self.metric(y_true[mask], y_pred[mask])
-                scores.append(score)
+
+                if np.any(mask):
+                    print(y_true[mask].shape, y_pred[mask].shape)
+                    score = self.metric(y_true[mask], y_pred[mask])
+                    scores.update({n: score})
 
             return scores
 
@@ -56,7 +58,6 @@ class Metric:
 
 
 class CustomMetric(Metric):
-
     @property
     def verbose_name(self):
         if self._verbose_name is None:
@@ -99,24 +100,20 @@ class CustomMetric(Metric):
 
 
 class F1(Metric):
-
     def metric(self, y_true: np.ndarray, y_pred: np.ndarray):
         return f1_score(y_true, y_pred, **self._kwargs)
 
 
 class Accuracy(Metric):
-
     def metric(self, y_true: np.ndarray, y_pred: np.ndarray):
         return accuracy_score(y_true, y_pred, **self._kwargs)
 
 
 class Precision(Metric):
-
     def metric(self, y_true: np.ndarray, y_pred: np.ndarray):
         return precision_score(y_true, y_pred, **self._kwargs)
 
 
 class Recall(Metric):
-
     def metric(self, y_true: np.ndarray, y_pred: np.ndarray):
         return recall_score(y_true, y_pred, **self._kwargs)

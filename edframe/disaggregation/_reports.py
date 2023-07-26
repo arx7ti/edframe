@@ -9,20 +9,24 @@ from .metrics import Metric
 
 
 class Report:
-
     def __init__(self, metrics: Iterable['Metric' | 'Callable']) -> None:
         self._metrics = metrics
-        self._columns = ["Model"]
+        # self._columns = ["Model"]
 
-        for metric in metrics:
-            if isinstance(metric, Metric):
-                column = metric.verbose_name
-            elif inspect.isclass(metric):
-                column = metric.__name__
-            else:
-                column = metric.__class__.__name__
+        # for metric in metrics:
 
-            self._columns.append(column)
+        # self._columns.append(column)
+
+    @staticmethod
+    def _get_column_name(metric):
+        if isinstance(metric, Metric):
+            column = metric.verbose_name
+        elif inspect.isclass(metric):
+            column = metric.__name__
+        else:
+            column = metric.__class__.__name__
+
+        return column
 
     def __call__(
         self,
@@ -30,11 +34,12 @@ class Report:
         X: np.ndarray,
         y: np.ndarray,
     ) -> pd.DataFrame:
-        metrics = []
+        scores = []
+        columns = ["Model"]
 
         for model in models:
             model_name = model.__class__.__name__
-            model_metrics = [model_name]
+            model_scores = [model_name]
 
             if hasattr(model, "predict"):
                 y_pred = model.predict(X)
@@ -46,11 +51,26 @@ class Report:
                 raise ValueError("Model should be callable or have one of the methods "\
                                     "`predict` or `transform`")
 
+            fetch_columns = len(columns) == 1
+
             for metric in self._metrics:
                 # TODO wrapper for **kwargs
-                metric = metric(y, y_pred)
-                model_metrics.append(metric)
+                score = metric(y, y_pred)
 
-            metrics.append(model_metrics)
+                if isinstance(score, dict):
+                    model_scores.extend(list(score.values()))
+                else:
+                    model_scores.append(score)
 
-        return pd.DataFrame(metrics, columns=self._columns)
+                if fetch_columns:
+                    column = self._get_column_name(metric)
+
+                    if metric.is_componentwise():
+                        for n in score.keys():
+                            columns.append(f"{column}@{n}")
+                    else:
+                        columns.append(column)
+
+            scores.append(model_scores)
+
+        return pd.DataFrame(scores, columns=columns)
