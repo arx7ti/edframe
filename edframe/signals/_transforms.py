@@ -13,22 +13,28 @@ def identity(x: np.ndarray):
     return x
 
 
-def downsample(x: np.ndarray, n_samples: int) -> np.ndarray:
-    if n_samples > x.shape[-1]:
-        raise ValueError
-
-    x = resample(x, n_samples, axis=-1)
+def downsample(x: np.ndarray, fs0: int, fs: int) -> np.ndarray:
+    n_samples = round(len(x) / fs0 * fs)
+    # n1/fs1=n2/fs2
+    # n2=n1/fs1*fs2
+    assert n_samples < len(x)
+    x = resample(x, n_samples)
 
     return x
 
 
-def enhance(x: np.ndarray, n_samples: int, kind: str = 'linear') -> np.ndarray:
-    if n_samples < x.shape[-1]:
-        raise ValueError
+def enhance(
+    x: np.ndarray,
+    fs0: int,
+    fs: int,
+    kind: str = 'linear',
+) -> np.ndarray:
+    n_samples = round(len(x) / fs0 * fs)
+    assert n_samples > len(x)
 
-    t0 = np.linspace(0, 1, x.shape[-1], dtype=x.dtype)
+    t0 = np.linspace(0, 1, len(x), dtype=x.dtype)
     t1 = np.linspace(0, 1, n_samples, dtype=x.dtype)
-    mean = x.mean(axis=-1, keepdims=True)
+    mean = x.mean(keepdims=True)
     x = x - mean
     enhancer = interp1d(t0, x, kind=kind, axis=-1)
     x = enhancer(t1)
