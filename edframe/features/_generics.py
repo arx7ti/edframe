@@ -4,7 +4,7 @@ from types import FunctionType
 from typing import Optional, Any
 from sklearn.utils.validation import check_is_fitted
 from sklearn.exceptions import NotFittedError
-from sklearn.decomposition import PCA, FastICA
+from sklearn.decomposition import PCA
 from ..data.entities import DataSet
 from inspect import isclass
 
