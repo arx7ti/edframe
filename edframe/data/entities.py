@@ -1,4 +1,14 @@
 from __future__ import annotations
+from tqdm import tqdm
+from beartype import abby
+from ..signals import FITPS
+from copy import copy, deepcopy
+from collections import defaultdict
+from beartype.typing import Iterable
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import MultiLabelBinarizer
+from typing import Optional, Callable, Union, Any, Iterable
+from edframe.signals import F, pad, roll, extrapolate, replicate, enhance, downsample, crop
 
 # import torch
 import random
@@ -7,20 +17,12 @@ import numpy as np
 import pandas as pd
 import itertools as it
 
-from tqdm import tqdm
-from beartype import abby
-from copy import deepcopy
-from collections import defaultdict
-from beartype.typing import Iterable
-from sklearn.base import BaseEstimator
-from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import MultiLabelBinarizer
-from typing import Optional, Callable, Union, Any, Iterable
-
-from edframe.signals import F, pad, roll, extrapolate, replicate, enhance, crop
-
 
 class Generic:
+
+    @classmethod
+    def new(cls, *args, **kwargs):
+        return cls(*args, **kwargs)
 
     # __verbose__ = "{cls}()"
 
@@ -55,7 +57,8 @@ class Generic:
                 v = kwargs[p]
                 kwargs.pop(p)
             else:
-                v = deepcopy(v)
+                v = copy(v)
+
             state_dict.update({p: v})
 
         inst.__dict__.update(state_dict)
@@ -137,8 +140,8 @@ class Backref(Generic):
     def values(self) -> np.ndarray:
         raise NotImplementedError
 
-    def new(self):
-        return self.__class__(backref=self.backref, data=None)
+    # def new(self):
+    #     return self.__class__(backref=self.backref, data=None)
 
     def update(self, **kwargs):
         x = super().update(backref=self.backref, **kwargs)
@@ -422,15 +425,20 @@ class Features(BackrefDataFrame):
 
         dfs = []
 
+        print("EXTRACTING")
         for fn in fns:
             # TODO Must be feature
             df = fn(self.backref)
             dfs.append(df)
             del df
 
+        print("DONE")
         df = pd.concat(dfs, axis=1)
 
-        return self.update(data=df, _extractors=list(fns))
+        print("UPDATING")
+        d = self.update(data=df, _extractors=list(fns))
+        print("DONE\n")
+        return d
         # TODO prop estimators
 
 
@@ -870,6 +878,7 @@ class PowerSample(Generic):
             return roi.crop(self)
 
     def crop(self, a: int, b: int) -> PowerSample:
+        # TODO generalize for ndarray data
         data = crop(self.data, a, b)
         return self.update(data=data)
 
@@ -893,8 +902,12 @@ class PowerSample(Generic):
         if fs < self.fs:
             raise ValueError
 
-        data = enhance(self.data, fs, kind=kind)
+        data = enhance(self.data, self.fs, fs, kind=kind)
 
+        return self.update(data=data, fs=fs)
+
+    def downsample(self, fs: int) -> PowerSample:
+        data = downsample(self.data, self.fs, fs)
         return self.update(data=data, fs=fs)
 
     def replicate(self, n: int) -> PowerSample:
@@ -922,6 +935,7 @@ class VI(PowerSample):
         aggregation: Optional[str] = '+',
         **kwargs: Any,
     ):
+        # TODO RESTRICT data should be ndarray only
         super().__init__(data=[v, i],
                          fs=fs,
                          fs_type="high",
@@ -964,6 +978,16 @@ class VI(PowerSample):
     @values.setter
     def values(self, i: np.ndarray):
         self.i = i
+
+    def crop(self, a, b):
+        v = crop(self.v, a, b)
+        i = crop(self.i, a, b)
+        return self.update(data=[v, i])
+
+    def downsample(self, fs: int) -> PowerSample:
+        v = downsample(self.v, self.fs, fs)
+        i = downsample(self.i, self.fs, fs)
+        return self.update(v=v, i=i, fs=fs)
 
 
 class I(PowerSample):
@@ -1042,7 +1066,7 @@ class DataSet(Generic):
 
     @property
     def data(self):
-        return self._data
+        return copy(self._data)
 
     @data.setter
     def data(self, data):
@@ -1116,15 +1140,14 @@ class DataSet(Generic):
 
         y = np.zeros((len(data), len(self._class_names)),
                      dtype=float if problem_type == "regression" else int)
+        mask = np.nonzero(mlbin.fit_transform(labels) > 0)
 
-        for i, (c, l) in enumerate(zip(class_labels, labels)):
-
-            j = np.nonzero(mlbin.fit_transform([c]).ravel() > 0)
-
-            if problem_type == "classification":
-                l = [1] * len(j)
-
-            y[i, j] = l
+        if problem_type == "classification":
+            y[mask] = 1
+        else:
+            # TODO not tested at all
+            for maski, yi in zip(mask, labels):
+                y[maski] = yi
 
         self._labels = y
         self._rng = np.random.RandomState(random_seed)
@@ -1145,10 +1168,6 @@ class DataSet(Generic):
 
     def __len__(self):
         return len(self.data)
-
-    @classmethod
-    def new(cls, samples):
-        return cls(samples)
 
     def create(self, *args: Any, **kwargs: Any) -> PowerSample:
         sample_cls = self.data[0].__class__
@@ -1245,3 +1264,15 @@ class DataSet(Generic):
 
 class HIDataSet(DataSet):
     __high__ = True
+
+    def sync(self):
+        data = []
+        fitps = FITPS()
+
+        for sample in tqdm(self.data):
+            v, i = fitps(sample.v, sample.i, fs=sample.fs)
+            v, i = v.ravel(), i.ravel()
+            sample = sample.new(v=v, i=i, labels=sample.labels, fs=sample.fs)
+            data.append(sample)
+
+        return self.new(data)
