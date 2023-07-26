@@ -1,13 +1,12 @@
 from __future__ import annotations
-
+from tqdm import tqdm
+# from beartype import abby
 from typing import Optional, Callable, Iterable
 from sklearn.cluster import AgglomerativeClustering
-from beartype import abby
+from ..data.entities import PowerSample, DataSet
 
 import numpy as np
-import itertools as it
-
-from ..data.entities import PowerSample, DataSet
+# import itertools as it
 
 
 class EventDetector:
@@ -20,8 +19,8 @@ class EventDetector:
     def verbose_name(self):
         if self.__verbose_name__ is None:
             return self.__class__.__name__
-        else:
-            return self.__verbose_name__
+
+        return self.__verbose_name__
 
     @property
     def source_name(self) -> str:
@@ -144,9 +143,9 @@ class ThresholdEvent(EventDetector):
 
         self.check_fn(x, **kwargs)
 
-        n = len(x)
         x = self._striding_window_view(x)
         x = np.apply_along_axis(self._window, axis=1, arr=x)
+        x = np.where(x > self._alpha, 1, 0)
         dx = np.diff(x > self._alpha, prepend=False).astype(int)
         signs = np.sign(dx)
         locs0 = np.argwhere(signs > 0).ravel()
@@ -155,10 +154,9 @@ class ThresholdEvent(EventDetector):
 
         # Calibration
         if len(locs) % 2 > 0:
-            locs = np.append(locs, n)
+            locs = np.append(locs, len(x) - 1)
 
         signs = signs[locs]
-        signs = np.where(signs < 0, 0, 1)
         locs *= self._window_size
         locs[len(locs0):] -= 1
         events = list(zip(locs, signs))
@@ -235,7 +233,7 @@ class DerivativeEvent(EventDetector):
 
         # Signs
         signs = np.sign(dx[locs])
-        signs = np.where(signs < 0, 0, 1)
+        # signs = np.where(signs < 0, 0, 1)
         locs *= self._window_size
         assert locs[-1] < len(x) * self._window_size
         # Events
@@ -298,7 +296,7 @@ class ROI:
             # TODO the same style for feature extraction
             roi = []
 
-            for _x in x.data:
+            for _x in tqdm(x.data):
                 roi.extend(_crop(_x, self._detectors))
 
             dataset = x.__class__(roi)
