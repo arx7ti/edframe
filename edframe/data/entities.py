@@ -58,12 +58,18 @@ class Generic:
             else:
                 # TODO time & memory tests
                 v = copy(v)
+                # v = deepcopy(v)
+
+            if isinstance(v, Backref):
+                # TODO check
+                v.backref = inst
 
             state_dict.update({p: v})
 
         inst.__dict__.update(state_dict)
 
         properties = self.properties()
+
         for p, v in kwargs.items():
             if p in properties:
                 setattr(inst, p, v)
@@ -376,10 +382,6 @@ class Events(Backref):
 
     def to_features(self) -> Features:
         raise NotImplementedError
-
-
-class Linkage:
-    pass
 
 
 class Features(BackrefDataFrame):
@@ -1221,11 +1223,19 @@ class DataSet(Generic):
         else:
             stratify = self.labels.sum(1)
 
-        data_train, data_test = train_test_split(self.data,
-                                                 test_size=test_size,
-                                                 stratify=stratify)
+        train, test = train_test_split(range(self.count()),
+                                       test_size=test_size,
+                                       stratify=stratify)
+        X_train = [self.data[i] for i in train]
+        X_test = [self.data[i] for i in test]
+        Y_train = self._labels[train]
+        Y_test = self._labels[test]
 
-        return self.new(data_train), self.new(data_test)
+        # TODO to .new but deal with inconsistent labels
+        train = self.update(data=X_train, _labels=Y_train)
+        test = self.update(data=X_test, _labels=Y_test)
+
+        return train, test
 
     def align(
         self,
