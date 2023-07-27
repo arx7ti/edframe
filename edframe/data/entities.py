@@ -520,39 +520,39 @@ class Components(Backref):
 
         return self.update(data=values)
 
-    def apply(
-        self,
-        fs: Callable | Iterable[Callable | tuple[int, Callable] | None],
-    ) -> Components:
-        if self.is_allowed_transform():
-            if isinstance(fs, Callable):
-                data = np.apply_along_axis(fs, axis=0, arr=self.data)
-            elif abby.is_bearable(
-                    fs, Iterable[Callable | tuple[int, Callable] | None]):
-                if abby.is_bearable(fs, Iterable[Callable | None]):
-                    fs = enumerate(fs)
-                    fs = [None if f is None else (i, f) for i, f in fs]
-                    if len(fs) != self.count():
-                        raise ValueError
-                elif not abby.is_bearable(fs, Iterable[tuple[int, Callable]]):
-                    raise ValueError
+    # def apply(
+    #     self,
+    #     fs: Callable | Iterable[Callable | tuple[int, Callable] | None],
+    # ) -> Components:
+    #     if self.is_allowed_transform():
+    #         if isinstance(fs, Callable):
+    #             data = np.apply_along_axis(fs, axis=0, arr=self.data)
+    #         elif abby.is_bearable(
+    #                 fs, Iterable[Callable | tuple[int, Callable] | None]):
+    #             if abby.is_bearable(fs, Iterable[Callable | None]):
+    #                 fs = enumerate(fs)
+    #                 fs = [None if f is None else (i, f) for i, f in fs]
+    #                 if len(fs) != self.count():
+    #                     raise ValueError
+    #             elif not abby.is_bearable(fs, Iterable[tuple[int, Callable]]):
+    #                 raise ValueError
 
-                data = np.empty_like(self.data)
-                mask = np.ones(self.count(), dtype=bool)
+    #             data = np.empty_like(self.data)
+    #             mask = np.ones(self.count(), dtype=bool)
 
-                for _fs in fs:
-                    if _fs is not None:
-                        i, f = _fs
-                        data[i] = f(self.data[i])
-                        mask[i] = False
+    #             for _fs in fs:
+    #                 if _fs is not None:
+    #                     i, f = _fs
+    #                     data[i] = f(self.data[i])
+    #                     mask[i] = False
 
-                data[mask] = self.data[mask]
-            else:
-                raise ValueError
-        else:
-            raise AttributeError("Transformation is not allowed")
+    #             data[mask] = self.data[mask]
+    #         else:
+    #             raise ValueError
+    #     else:
+    #         raise AttributeError("Transformation is not allowed")
 
-        return self.update(data=data)
+    #     return self.update(data=data)
 
     def map(
         self,
@@ -823,36 +823,36 @@ class PowerSample(Generic):
 
         return self.update(data=data, _locs=locs, _components=components)
 
-    @State.check
-    def apply(
-        self,
-        fns: Union[Callable, Iterable[Callable, F]],
-        # source_name: Optional[str]=None,
-    ) -> PowerSample:
-        if not isinstance(fns, Iterable):
-            fns = [fns]
+    # @State.check
+    # def apply(
+    #     self,
+    #     fns: Union[Callable, Iterable[Callable, F]],
+    #     # source_name: Optional[str]=None,
+    # ) -> PowerSample:
+    #     if not isinstance(fns, Iterable):
+    #         fns = [fns]
 
-        if len(fns) == 0:
-            raise ValueError
+    #     if len(fns) == 0:
+    #         raise ValueError
 
-        ps = self.copy()
+    #     ps = self.copy()
 
-        for fn in fns:
-            if not isinstance(fn, F):
-                # TODO generalize F to features and events?
-                arg = tuple(inspect.signature(fn).parameters)[0]
-                # TODO values to data
-                fn = F(fn, ("values", ), **{arg: "values"})
+    #     for fn in fns:
+    #         if not isinstance(fn, F):
+    #             # TODO generalize F to features and events?
+    #             arg = tuple(inspect.signature(fn).parameters)[0]
+    #             # TODO values to data
+    #             fn = F(fn, ("values", ), **{arg: "values"})
 
-            # TODO must return signal
-            ps = fn(ps)
+    #         # TODO must return signal
+    #         ps = fn(ps)
 
-            # if not is_signal(ps.)
-            # if not isinstance(ps.source(), np.ndarray):
-            #     raise ValueError
-            # elif len(ps)
+    #         # if not is_signal(ps.)
+    #         # if not isinstance(ps.source(), np.ndarray):
+    #         #     raise ValueError
+    #         # elif len(ps)
 
-        return ps
+    #     return ps
 
     def map(self, fns):
         # TODO signal to custom value
@@ -951,7 +951,7 @@ class VI(PowerSample):
                          components=components,
                          aggregation=aggregation,
                          **kwargs)
-        self._2d = len(v.shape) == len(i.shape) == 2
+        self._sync = False or len(data.shape) == 3
 
     def __add__(self, sample):
         return self.agg(sample)
@@ -966,8 +966,8 @@ class VI(PowerSample):
         labels = self.labels + sample.labels
         return self.update(v=v, i=i, labels=labels)
 
-    def is_2d(self):
-        return self._2d
+    def is_sync(self):
+        return self._sync
 
     @property
     def v(self):
@@ -997,15 +997,32 @@ class VI(PowerSample):
     def values(self, i: np.ndarray):
         self.i = i
 
-    # def crop(self, a, b):
-    #     v = crop(self.v, a, b)
-    #     i = crop(self.i, a, b)
-    #     return self.update(data=[v, i])
+    def mean_cycle(self):
+        if not self.is_sync():
+            raise ValueError
 
-    # def downsample(self, fs: int) -> PowerSample:
-    #     v = downsample(self.v, self.fs, fs)
-    #     i = downsample(self.i, self.fs, fs)
-    #     return self.update(v=v, i=i, fs=fs)
+        if len(self.data.shape) < 3:
+            axes = self.data.shape
+            data = self.data.reshape(*axes[:-1], -1, round(self.fs / self.f0))
+        else:
+            data = self.data
+
+        data = np.mean(data, axis=1)
+
+        return self.update(data=data)
+
+    def sync(self):
+        fitps = FITPS()
+        v, i = fitps(self.v, self.i, fs=self.fs)
+        v, i = v.ravel(), i.ravel()
+        data = np.stack((v, i), axis=0)
+
+        if self.f0 is None:
+            return self.update(data=data,
+                               _sync=True,
+                               _f0=round(self.fs / v.shape[1]))
+
+        return self.update(data=data, _sync=True)
 
 
 class I(PowerSample):
@@ -1029,7 +1046,7 @@ class I(PowerSample):
                          components=components,
                          aggregation=aggregation,
                          **kwargs)
-        self._2d = len(i.shape) == 2
+        self._sync = len(i.shape) == 2
 
     def __add__(self, sample):
         return self.agg(sample)
@@ -1042,8 +1059,8 @@ class I(PowerSample):
         labels = self.labels + sample.labels
         return self.update(i=i, labels=labels)
 
-    def is_2d(self):
-        return self._2d
+    def is_sync(self):
+        return self._sync
 
     @property
     def i(self):
@@ -1196,13 +1213,13 @@ class DataSet(Generic):
     def count(self):
         return len(self)
 
-    def apply(self, fs):
-        data = []
+    # def apply(self, fs):
+    #     data = []
 
-        for sample in self.data:
-            data.append(sample.apply(fs))
+    #     for sample in self.data:
+    #         data.append(sample.apply(fs))
 
-        return self.update(data=data)
+    #     return self.update(data=data)
 
     def is_aligned(self, source_name: Optional[str] = None):
         if source_name is None:
@@ -1295,12 +1312,11 @@ class HIDataSet(DataSet):
 
     def sync(self):
         data = []
-        fitps = FITPS()
 
         for sample in tqdm(self.data):
-            v, i = fitps(sample.v, sample.i, fs=sample.fs)
-            v, i = v.ravel(), i.ravel()
-            sample = sample.new(v=v, i=i, labels=sample.labels, fs=sample.fs)
-            data.append(sample)
+            if hasattr(sample, "sync"):
+                data.append(sample.sync())
+            else:
+                raise AttributeError
 
         return self.new(data)
