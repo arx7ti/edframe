@@ -16,7 +16,6 @@ from ..entities import DataSet
 
 
 class Composer:
-
     def __init__(
         self,
         dataset: DataSet,
@@ -182,17 +181,7 @@ class Composer:
 
 
 class HComposer(Composer):
-
     def compose(self, Ii, keep_components: bool = False):
         components = [self.dataset[i] for i in Ii]
         sample = reduce(add, components)
-        # labels = [sample.label for sample in components]
-        # args = (data, self.dataset.fs)
-        # kwargs = {"labels": labels}
-
-        # if keep_components:
-        #     kwargs.update(components=components)
-
-        # sample = self.dataset.create(*args, **kwargs)
-
         return sample
