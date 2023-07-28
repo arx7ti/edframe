@@ -16,6 +16,7 @@ from ..entities import DataSet
 
 
 class Composer:
+
     def __init__(
         self,
         dataset: DataSet,
@@ -156,7 +157,24 @@ class Composer:
 
         return I
 
-    def compose(self, Ii, keep_components: bool = False):
+    def schedule(
+        self,
+        n_samples: int,
+        n_classes: int,
+        n_rolls: int = 1,
+    ) -> np.ndarray:
+        window_size = self.dataset.values.shape[1]  # TODO if 2d
+
+        if n_rolls > 0:
+            rolls = np.random.randint(0,
+                                      window_size,
+                                      size=(n_samples, n_rolls, n_classes))
+        else:
+            rolls = np.zeros((n_samples, 1, n_classes))
+
+        return rolls
+
+    def compose(self, idxs, rolls, keep_components: bool = False):
         raise NotImplementedError
 
     def make_samples(
@@ -164,6 +182,7 @@ class Composer:
         n_samples: int = 100,
         n_classes: int = 2,
         n_reps: np.ndarray = None,
+        n_rolls: int = 1,
         keep_components: bool = False,
     ):
         samples = []
@@ -171,9 +190,12 @@ class Composer:
                         n_classes=n_classes,
                         n_reps=n_reps)
 
-        for Ii in tqdm(I):
-            sample = self.compose(Ii, keep_components=keep_components)
-            samples.append(sample)
+        R = self.schedule(n_samples=len(I),
+                          n_classes=n_classes,
+                          n_rolls=n_rolls)
+
+        for i, r in tqdm(I, R):
+            samples.extend(self.compose(i, r, keep_components=keep_components))
 
         dataset = self.dataset.new(samples)
 
@@ -181,7 +203,13 @@ class Composer:
 
 
 class HComposer(Composer):
-    def compose(self, Ii, keep_components: bool = False):
-        components = [self.dataset[i] for i in Ii]
-        sample = reduce(add, components)
-        return sample
+
+    def compose(self, idxs, rolls, keep_components: bool = False):
+        samples = []
+        components = [self.dataset[i] for i in idxs]
+
+        for r in rolls:
+            sample = reduce(add, [x.roll(r) for x in components])
+            samples.append(sample)
+
+        return samples
