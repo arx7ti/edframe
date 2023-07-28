@@ -193,7 +193,7 @@ class Composer:
                           n_classes=n_classes,
                           n_rolls=n_rolls)
 
-        for i, r in tqdm(zip(I, R)):
+        for i, r in tqdm(zip(I, R), total=len(I)):
             samples.extend(self.compose(i, r, keep_components=keep_components))
 
         dataset = self.dataset.new(samples)
