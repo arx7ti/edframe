@@ -1024,9 +1024,21 @@ class VI(PowerSample):
 
         return self.update(data=data, _sync=True)
 
+    def roll(self, n: int) -> PowerSample:
+        period = round(self.fs / self.f0)
+        data = roll(self.data, n // period * period)
+        data[1, :n] = 0
+        return self.update(data=data)
+
 
 class I(PowerSample):
     __high__ = True
+
+    def roll(self, n: int) -> PowerSample:
+        period = round(self.fs / self.f0)
+        data = roll(self.data, n // period * period)
+        data[:n] = 0
+        return self.update(data=data)
 
     def __init__(
         self,
