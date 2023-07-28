@@ -19,7 +19,6 @@ import itertools as it
 
 
 class Generic:
-
     @classmethod
     def new(cls, *args, **kwargs):
         return cls(*args, **kwargs)
@@ -165,7 +164,6 @@ class Backref(Generic):
 
 
 class AttributeExtractors(Backref):
-
     @property
     def values(self):
         values = [getattr(self, n) for n in self.names]
@@ -342,7 +340,6 @@ class BackrefDataFrame(Backref):
 
 # TODO not DataFrame, but dict[timestamp, list[event.verbose_name]]
 class Events(Backref):
-
     @property
     def data(self) -> pd.DataFrame:
         return self._data
@@ -578,7 +575,6 @@ class LockedError(Exception):
 
 
 class GenericState:
-
     def __init__(self) -> None:
         self._locked = False
         self._msg = ""
@@ -614,10 +610,8 @@ class PowerSample(Generic):
     __high__: bool = False
 
     class State(GenericState):
-
         @classmethod
         def check(cls, method: Callable):
-
             def wrapper(self, *args, **kwargs):
                 if not issubclass(self.__class__, PowerSample):
                     raise ValueError("Argument \"self\" is required")
@@ -642,7 +636,6 @@ class PowerSample(Generic):
 
         @classmethod
         def check_init_args(cls, method):
-
             def wrapper(*args, **kwargs):
                 labels = kwargs.get("labels", None)
                 appliances = kwargs.get("appliances", None)
@@ -1025,9 +1018,17 @@ class VI(PowerSample):
         return self.update(data=data, _sync=True)
 
     def roll(self, n: int) -> PowerSample:
+        if n == 0:
+            return self.update()
+
         period = round(self.fs / self.f0)
-        data = roll(self.data, n // period * period)
-        data[1, :n] = 0
+        data = roll(self.data, abs(n) // period * period)
+
+        if n < 0:
+            data[1, n:] = 0
+        else:
+            data[1, :n] = 0
+
         return self.update(data=data)
 
 
