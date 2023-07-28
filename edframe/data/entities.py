@@ -1283,12 +1283,9 @@ class DataSet(Generic):
         self,
         n: int = None,
         if_less: str = "pad",
-        if_more: str = "crop",
     ) -> DataSet:
-        if if_less not in ["pad", "extrapolate", "replicate", "drop"]:
-            raise ValueError
-
-        if if_more not in ["crop", "random_crop", "drop"]:
+        # TODO overlapped cropping
+        if if_less not in ["pad", "extrapolate", "drop"]:
             raise ValueError
 
         if n is None:
@@ -1299,22 +1296,23 @@ class DataSet(Generic):
         samples = []
 
         for sample in tqdm(self.data):
-            dn = n - len(sample)
+            if n > len(sample):
+                raise ValueError(
+                    "Argument `n` cannot be more than the length of a sample"
+                )
 
-            if dn > 0 and if_less == "pad":
-                sample = sample.pad((0, dn))
-            elif dn > 0 and if_less == "extrapolate":
-                sample = sample.extrapolate((0, dn))
-            elif dn > 0 and if_less == "replicate":
-                sample = sample.replicate((0, dn))
-            elif dn < 0 and if_more == "crop":
-                sample = sample.crop(0, n)
-            elif dn < 0 and if_more == "random_crop":
-                sample = sample.random_crop(abs(dn))
-            elif dn != 0:
-                continue
+            for i in range(0, len(sample), n):
+                subsample = sample[i:i + n]
+                dn = n - len(subsample)
 
-            samples.append(sample)
+                if dn > 0 and if_less == "pad":
+                    subsample = subsample.pad((0, dn))
+                elif dn > 0 and if_less == "extrapolate":
+                    subsample = subsample.extrapolate((0, dn))
+                elif dn > 0 and if_less == "drop":
+                    break
+
+                samples.append(subsample)
 
         return self.new(samples)
 
