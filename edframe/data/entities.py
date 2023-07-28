@@ -1225,6 +1225,10 @@ class DataSet(Generic):
     def count(self):
         return len(self)
 
+    def random(self):
+        idx = self._rng.randint(0, self.count())
+        return self[idx]
+
     # def apply(self, fs):
     #     data = []
 
