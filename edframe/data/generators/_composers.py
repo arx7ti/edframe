@@ -166,8 +166,8 @@ class Composer:
         window_size = self.dataset.values.shape[1]  # TODO if 2d
 
         if n_rolls > 0:
-            rolls = np.random.randint(0,
-                                      window_size,
+            rolls = self._rng.randint(-window_size,
+                                      window_size + 1,
                                       size=(n_samples, n_rolls, n_classes))
         else:
             rolls = np.zeros((n_samples, 1, n_classes))
