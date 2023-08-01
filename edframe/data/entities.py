@@ -768,7 +768,10 @@ class PowerSample(Generic):
 
     @property
     def locs(self):
-        return self._locs
+        if self._locs is None:
+            return np.asarray([0, len(self.values)])
+        else:
+            return self._locs
 
     @property
     def appliances(self):
@@ -898,7 +901,9 @@ class PowerSample(Generic):
 
     def roll(self, n: int) -> PowerSample:
         data = roll(self.data, n)
-        return self.update(data=data)
+        locs = np.clip(self.locs + n, a_min=0, a_max=len(self))
+        # TODO roll components
+        return self.update(data=data, _locs=locs)
 
     def enhance(self, fs: int, kind: str = "linear") -> PowerSample:
         if fs < self.fs:
