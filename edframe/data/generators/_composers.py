@@ -16,7 +16,6 @@ from ..entities import DataSet
 
 
 class Composer:
-
     def __init__(
         self,
         dataset: DataSet,
@@ -168,9 +167,9 @@ class Composer:
         if n_rolls > 0:
             rolls = self._rng.randint(-window_size,
                                       window_size + 1,
-                                      size=(n_samples, n_rolls, n_classes))
+                                      size=(n_samples, n_rolls, n_classes - 1))
         else:
-            rolls = np.zeros((n_samples, 1, n_classes))
+            rolls = np.zeros((n_samples, 1, n_classes - 1))
 
         return rolls
 
@@ -194,7 +193,7 @@ class Composer:
                           n_classes=n_classes,
                           n_rolls=n_rolls)
 
-        for i, r in tqdm(I, R):
+        for i, r in tqdm(zip(I, R), total=len(I)):
             samples.extend(self.compose(i, r, keep_components=keep_components))
 
         dataset = self.dataset.new(samples)
@@ -203,13 +202,13 @@ class Composer:
 
 
 class HComposer(Composer):
-
     def compose(self, idxs, rolls, keep_components: bool = False):
         samples = []
         components = [self.dataset[i] for i in idxs]
+        sample0 = components.pop(0)
 
         for r in rolls:
-            sample = reduce(add, [x.roll(r) for x in components])
-            samples.append(sample)
+            sample = reduce(add, [x.roll(rx) for x, rx in zip(components, r)])
+            samples.append(sample0 + sample)
 
         return samples
