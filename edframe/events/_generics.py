@@ -263,31 +263,43 @@ class ROI:
     ) -> PowerSample | DataSet | np.ndarray:
 
         def _crop(x: PowerSample | np.ndarray, detectors):
-            detector0 = detectors[0]
-            events0 = detector0(x)
-            locs0, _ = zip(*events0)
+            if x.isfullyfit():
 
-            if detector0.is_continuous():
-                locs2d0 = []
+                detector0 = detectors[0]
+                # FIXME if not isfullyfit
+                events0 = detector0(x)
+                locs0, _ = zip(*events0)
 
-                for i in range(1, len(locs0)):
-                    a = locs0[i - 1]
-                    b = locs0[i]
-                    locs2d0.append((a, b))
-            else:
-                locs2d0 = [locs0[i:i + 2] for i in range(0, len(locs0), 2)]
+                if detector0.is_continuous():
+                    locs2d0 = []
 
-            del locs0
+                    for i in range(1, len(locs0)):
+                        a = locs0[i - 1]
+                        b = locs0[i]
+                        locs2d0.append((a, b))
+                else:
+                    locs2d0 = [locs0[i:i + 2] for i in range(0, len(locs0), 2)]
+
+                del locs0
+
+                roi = []
+
+                for a0, b0 in locs2d0:
+                    xab0 = x[a0:b0]
+
+                    if len(detectors) > 1 and len(xab0) > 1:
+                        roi.extend(_crop(xab0, detectors[1:]))
+                    else:
+                        roi.append(xab0)
+
+                return roi
 
             roi = []
 
-            for a0, b0 in locs2d0:
-                xab0 = x[a0:b0]
-
-                if len(detectors) > 1 and len(xab0) > 1:
-                    roi.extend(_crop(xab0, detectors[1:]))
-                else:
-                    roi.append(xab0)
+            for a, b in x.locs:
+                # print(a, b)
+                # print(x[a:b].locs, x[a:b].isfullyfit())
+                roi.extend(_crop(x[a:b], detectors))
 
             return roi
 
