@@ -19,6 +19,7 @@ import itertools as it
 
 
 class Generic:
+
     @classmethod
     def new(cls, *args, **kwargs):
         return cls(*args, **kwargs)
@@ -164,6 +165,7 @@ class Backref(Generic):
 
 
 class AttributeExtractors(Backref):
+
     @property
     def values(self):
         values = [getattr(self, n) for n in self.names]
@@ -340,6 +342,7 @@ class BackrefDataFrame(Backref):
 
 # TODO not DataFrame, but dict[timestamp, list[event.verbose_name]]
 class Events(Backref):
+
     @property
     def data(self) -> pd.DataFrame:
         return self._data
@@ -575,6 +578,7 @@ class LockedError(Exception):
 
 
 class GenericState:
+
     def __init__(self) -> None:
         self._locked = False
         self._msg = ""
@@ -610,8 +614,10 @@ class PowerSample(Generic):
     __high__: bool = False
 
     class State(GenericState):
+
         @classmethod
         def check(cls, method: Callable):
+
             def wrapper(self, *args, **kwargs):
                 if not issubclass(self.__class__, PowerSample):
                     raise ValueError("Argument \"self\" is required")
@@ -636,6 +642,7 @@ class PowerSample(Generic):
 
         @classmethod
         def check_init_args(cls, method):
+
             def wrapper(*args, **kwargs):
                 labels = kwargs.get("labels", None)
                 appliances = kwargs.get("appliances", None)
@@ -676,7 +683,7 @@ class PowerSample(Generic):
                     lengths.update(components=len(components))
 
             if len(lengths) > 1:
-                vs = list(lengths.values())
+                vs = np.asarray(list(lengths.values()))
 
                 if not np.all(vs[1:] == vs[0]):
                     msg = "%s must have the same length" % (", ".join(
@@ -762,9 +769,21 @@ class PowerSample(Generic):
     @property
     def locs(self):
         if self._locs is None:
-            return np.asarray([0, len(self.values)])
-        else:
-            return self._locs
+            n_labels = self.n_labels
+
+            if n_labels == 0:
+                n_labels = 1
+
+            return np.asarray([[0, len(self.values)]] * n_labels)
+
+        return self._locs
+
+    @property
+    def n_labels(self):
+        if self.labels is None:
+            return 0
+
+        return len(self.labels)
 
     @property
     def appliances(self):
@@ -806,18 +825,23 @@ class PowerSample(Generic):
 
         data = self.data[..., ab]
         components = self.components
-        locs = self.locs
 
         # TODO
         if components.count() > 0:
             components = components[..., ab]
 
-        if locs is not None:
+        # FIXME
+        if not self.isfullyfit():
             a = 0 if ab.start is None else ab.start
             b = data.shape[-1] - a if ab.stop is None else ab.stop
-            locs = np.clips(locs, a_min=a, a_max=b - 1)
+            locs = np.clip(self.locs, a_min=a, a_max=b)
+        else:
+            locs = None
 
         return self.update(data=data, _locs=locs, _components=components)
+
+    def isfullyfit(self):
+        return np.all((self.locs[:, 0] == 0) & (self.locs[:, 1] == len(self)))
 
     # @State.check
     # def apply(
@@ -962,7 +986,9 @@ class VI(PowerSample):
         v = np.mean((self.v, sample.v), axis=0)
         i = self.i + sample.i
         labels = self.labels + sample.labels
-        return self.update(v=v, i=i, labels=labels)
+        locs = np.concatenate((self.locs, sample.locs))
+        # TODO assure that n locs == n labels
+        return self.update(v=v, i=i, labels=labels, _locs=locs)
 
     def is_sync(self):
         return self._sync
@@ -1023,6 +1049,9 @@ class VI(PowerSample):
         return self.update(data=data, _sync=True)
 
     def roll(self, n: int) -> PowerSample:
+        if abs(n) >= len(self):
+            raise ValueError
+
         if n == 0:
             return self.update()
 
@@ -1034,17 +1063,32 @@ class VI(PowerSample):
         else:
             data[1, :n] = 0
 
-        return self.update(data=data)
+        locs = np.clip(self.locs + n, a_min=0, a_max=len(self))
+
+        return self.update(data=data, _locs=locs)
 
 
 class I(PowerSample):
     __high__ = True
 
     def roll(self, n: int) -> PowerSample:
+        if abs(n) >= len(self):
+            raise ValueError
+
+        if n == 0:
+            return self.update()
+
         period = round(self.fs / self.f0)
         data = roll(self.data, n // period * period)
-        data[:n] = 0
-        return self.update(data=data)
+
+        if n < 0:
+            data[n:] = 0
+        else:
+            data[:n] = 0
+
+        locs = np.clip(self.locs + n, a_min=0, a_max=len(self))
+
+        return self.update(data=data, _locs=locs)
 
     def __init__(
         self,
@@ -1075,7 +1119,8 @@ class I(PowerSample):
     def agg(self, sample: I) -> I:
         i = self.i + sample.i
         labels = self.labels + sample.labels
-        return self.update(i=i, labels=labels)
+        locs = np.concatenate((self.locs, sample.locs))
+        return self.update(i=i, labels=labels, _locs=locs)
 
     def is_sync(self):
         return self._sync
@@ -1303,8 +1348,7 @@ class DataSet(Generic):
         for sample in tqdm(self.data):
             if n > len(sample):
                 raise ValueError(
-                    "Argument `n` cannot be more than the length of a sample"
-                )
+                    "Argument `n` cannot be more than the length of a sample")
 
             for i in range(0, len(sample), n):
                 subsample = sample[i:i + n]
