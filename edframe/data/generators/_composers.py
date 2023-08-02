@@ -16,6 +16,7 @@ from ..entities import DataSet
 
 
 class Composer:
+
     def __init__(
         self,
         dataset: DataSet,
@@ -165,8 +166,8 @@ class Composer:
         window_size = self.dataset.values.shape[1]  # TODO if 2d
 
         if n_rolls > 0:
-            rolls = self._rng.randint(-window_size,
-                                      window_size + 1,
+            rolls = self._rng.randint(-window_size + 1,
+                                      window_size,
                                       size=(n_samples, n_rolls, n_classes - 1))
         else:
             rolls = np.zeros((n_samples, 1, n_classes - 1))
@@ -202,6 +203,7 @@ class Composer:
 
 
 class HComposer(Composer):
+
     def compose(self, idxs, rolls, keep_components: bool = False):
         samples = []
         components = [self.dataset[i] for i in idxs]
