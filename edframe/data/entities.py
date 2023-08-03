@@ -739,6 +739,7 @@ class PowerSample(Generic):
         self.__backref__(components=components)
 
         self.state = self.State()
+        # self._lmask = None
 
     def __len__(self):
         return len(self.values)
@@ -768,15 +769,16 @@ class PowerSample(Generic):
 
     @property
     def locs(self):
-        if self._locs is None:
-            n_labels = self.n_labels
+        if self.haslocs():
+            return self._locs
 
-            if n_labels == 0:
-                n_labels = 1
+        n_labels = self.n_labels
 
-            return np.asarray([[0, len(self.values)]] * n_labels)
+        if n_labels == 0:
+            n_labels = 1
 
-        return self._locs
+        # NOTE if n_labels = 0 and aggregated with n_labels > 0
+        return np.asarray([[0, len(self.values)]] * n_labels)
 
     @property
     def n_labels(self):
@@ -916,11 +918,19 @@ class PowerSample(Generic):
         data = pad(self.data, n)
         return self.update(data=data)
 
+    @property
+    def timesize(self):
+        return len(self)
+
+    # @property
+    # def lmask(self):
+    #     return self._lmask
+
+    def haslocs(self):
+        return self._locs is not None
+
     def roll(self, n: int) -> PowerSample:
-        data = roll(self.data, n)
-        locs = np.clip(self.locs + n, a_min=0, a_max=len(self))
-        # TODO roll components
-        return self.update(data=data, _locs=locs)
+        raise NotImplementedError
 
     def enhance(self, fs: int, kind: str = "linear") -> PowerSample:
         if fs < self.fs:
@@ -1057,13 +1067,19 @@ class VI(PowerSample):
 
         period = round(self.fs / self.f0)
         data = roll(self.data, abs(n) // period * period)
+        # lmask = np.zeros(self.timesize, dtype=bool)
 
         if n < 0:
             data[1, n:] = 0
+            # lmask[n:] = False
         else:
             data[1, :n] = 0
+            # lmask[:n] = False
 
-        locs = np.clip(self.locs + n, a_min=0, a_max=len(self))
+        if self.haslocs():
+            locs = np.clip(self.locs + n, a_min=0, a_max=self.timesize)
+        else:
+            locs = None
 
         return self.update(data=data, _locs=locs)
 
@@ -1080,13 +1096,19 @@ class I(PowerSample):
 
         period = round(self.fs / self.f0)
         data = roll(self.data, n // period * period)
+        # lmask = np.zeros(self.timesize, dtype=bool)
 
         if n < 0:
             data[n:] = 0
+            # lmask[n:] = False
         else:
             data[:n] = 0
+            # lmask[:n] = False
 
-        locs = np.clip(self.locs + n, a_min=0, a_max=len(self))
+        if self.haslocs():
+            locs = np.clip(self.locs + n, a_min=0, a_max=self.timesize)
+        else:
+            locs = None
 
         return self.update(data=data, _locs=locs)
 

@@ -131,7 +131,10 @@ class ThresholdEvent(EventDetector):
             return self._detect_from_dataset(x, **kwargs)
 
         if isinstance(x, PowerSample):
+            xlocs = x.locs
             x = x.source(self.source_name)
+        else:
+            xlocs = None
         # elif not isinstance(x, np.ndarray):
         #     raise ValueError
 
@@ -159,6 +162,18 @@ class ThresholdEvent(EventDetector):
         signs = signs[locs]
         locs *= self._window_size
         locs[len(locs0):] -= 1
+
+        if xlocs is not None:
+            # locs are not binded to labels
+            # what to do if we have labels?
+            # locs_upd = []
+            locs = np.clip(locs,
+                           a_min=xlocs[:, 0].min(),
+                           a_max=xlocs[:, 1].max())
+
+            # for ax,bx in xlocs:
+            #     ilocs = np.clip(locs, a_min=ax, a_max=bx)
+
         events = list(zip(locs, signs))
 
         return events
@@ -195,7 +210,10 @@ class DerivativeEvent(EventDetector):
             return self._detect_from_dataset(x, **kwargs)
 
         if isinstance(x, PowerSample):
+            xlocs = x.locs
             x = x.source(self.source_name)
+        else:
+            xlocs = None
 
         if not isinstance(x, np.ndarray):
             raise ValueError
@@ -236,6 +254,12 @@ class DerivativeEvent(EventDetector):
         # signs = np.where(signs < 0, 0, 1)
         locs *= self._window_size
         assert locs[-1] < len(x) * self._window_size
+
+        if xlocs is not None:
+            locs = np.clip(locs,
+                           a_min=xlocs[:, 0].min(),
+                           a_max=xlocs[:, 1].max())
+
         # Events
         events = list(zip(locs, signs))
 
@@ -263,45 +287,45 @@ class ROI:
     ) -> PowerSample | DataSet | np.ndarray:
 
         def _crop(x: PowerSample | np.ndarray, detectors):
-            if x.isfullyfit():
+            # if x.isfullyfit():
 
-                detector0 = detectors[0]
-                # FIXME if not isfullyfit
-                events0 = detector0(x)
-                locs0, _ = zip(*events0)
+            detector0 = detectors[0]
+            # FIXME if not isfullyfit
+            events0 = detector0(x)
+            locs0, _ = zip(*events0)
 
-                if detector0.is_continuous():
-                    locs2d0 = []
+            if detector0.is_continuous():
+                locs2d0 = []
 
-                    for i in range(1, len(locs0)):
-                        a = locs0[i - 1]
-                        b = locs0[i]
-                        locs2d0.append((a, b))
-                else:
-                    locs2d0 = [locs0[i:i + 2] for i in range(0, len(locs0), 2)]
+                for i in range(1, len(locs0)):
+                    a = locs0[i - 1]
+                    b = locs0[i]
+                    locs2d0.append((a, b))
+            else:
+                locs2d0 = [locs0[i:i + 2] for i in range(0, len(locs0), 2)]
 
-                del locs0
-
-                roi = []
-
-                for a0, b0 in locs2d0:
-                    xab0 = x[a0:b0]
-
-                    if len(detectors) > 1 and len(xab0) > 1:
-                        roi.extend(_crop(xab0, detectors[1:]))
-                    else:
-                        roi.append(xab0)
-
-                return roi
+            del locs0
 
             roi = []
 
-            for a, b in x.locs:
-                # print(a, b)
-                # print(x[a:b].locs, x[a:b].isfullyfit())
-                roi.extend(_crop(x[a:b], detectors))
+            for a0, b0 in locs2d0:
+                xab0 = x[a0:b0]
+
+                if len(detectors) > 1 and len(xab0) > 1:
+                    roi.extend(_crop(xab0, detectors[1:]))
+                else:
+                    roi.append(xab0)
 
             return roi
+
+            # roi = []
+
+            # for a, b in x.locs:
+            #     # print(a, b)
+            #     # print(x[a:b].locs, x[a:b].isfullyfit())
+            #     roi.extend(_crop(x[a:b], detectors))
+
+            # return roi
 
         if isinstance(x, DataSet):
             # TODO the same style for event detectors
