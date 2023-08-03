@@ -256,9 +256,19 @@ class DerivativeEvent(EventDetector):
         assert locs[-1] < len(x) * self._window_size
 
         if xlocs is not None:
-            locs = np.clip(locs,
-                           a_min=xlocs[:, 0].min(),
-                           a_max=xlocs[:, 1].max())
+            # N -> m
+            # N: [0 40] [50 70] [80 110] [120 150]
+            # m: [15 100], [30 90]
+            # -> [15 40] [50 70] [80 100]
+            # -> [30 40] [50 70] [80 90]
+            # --> [15 40] [50 70] [80 90]
+            ### ALG:
+            ### define labelled intervals for xlocs
+            ### extract locs from labelled intervals
+            ### for each set of labels define its own locs
+            for ax, bx in xlocs:
+                m = (locs >= ax) & (locs <= bx)
+                locs[m] = np.clip(locs[m], a_min=ax, a_max=bx)
 
         # Events
         events = list(zip(locs, signs))
