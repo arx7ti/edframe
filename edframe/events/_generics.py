@@ -163,18 +163,69 @@ class ThresholdEvent(EventDetector):
         locs *= self._window_size
         locs[len(locs0):] -= 1
 
+        # if xlocs is not None:
+        #     # locs are not binded to labels
+        #     # what to do if we have labels?
+        #     # locs_upd = []
+        #     locs = np.clip(locs,
+        #                    a_min=xlocs[:, 0].min(),
+        #                    a_max=xlocs[:, 1].max())
         if xlocs is not None:
-            # locs are not binded to labels
-            # what to do if we have labels?
-            # locs_upd = []
-            locs = np.clip(locs,
-                           a_min=xlocs[:, 0].min(),
-                           a_max=xlocs[:, 1].max())
+            # N -> m
+            # N: [0 40] [50 70] [80 110] [120 150] labels domain
+            # m: [15 100], [30 90] events in signal
+            # -> [15 40] [50 70] [80 100]
+            # -> [30 40] [50 70] [80 90]
+            # --> [15 40] [50 70] [80 90]
+            ### ALG:
+            ### define labelled intervals for xlocs
+            ### extract locs from labelled intervals
+            ### for each set of labels define its own locs
+
+            i = np.arange(max(xlocs.max(), locs.max()))
+            D = xlocs[:, 1] - xlocs[:, 0]
+            i0 = xlocs[:, 0]
+
+            mask = (i[:, None] >= i0) & (i[:, None] < (i0 + D))
+            acts = mask.sum(1)
+            i = np.argwhere(acts > 0).ravel()
+
+            di = np.diff(i, append=i[-1] + 1)
+
+            # Jumps in activations
+            jacts = np.argwhere(di != 1).ravel()
+
+            J = [[_j[0], _j[-1] + 1] for _j in np.split(i, jacts + 1)]
+            J = np.asarray(J)
+
+            # Jumps in original locs
+            jlocs = np.unique(xlocs.ravel()).reshape(-1, 2)
+
+            # Corrected locs
+            clocs = np.empty((0, 2), dtype=int)
+            Jmax = J.max()
+
+            for x0, x1 in locs.reshape(-1, 2):
+                _jacts = jlocs[(jlocs > x0) & (jlocs < x1)]
+
+                if np.any(x0 >= J[:, 0]):
+                    _jacts = np.insert(_jacts, 0, x0)
+
+                if np.all(x1 <= J[:, 1]) or x1 == Jmax:
+                    _jacts = np.append(_jacts, x1)
+
+                _clocs = np.repeat(_jacts, 2)[1:-1].reshape(-1, 2)
+                clocs = np.concatenate((clocs, _clocs))
+            
+            # FIXME end-index is exclusive 
+            # FIXME 0-length intervals
+            locs = clocs.ravel()
 
             # for ax,bx in xlocs:
             #     ilocs = np.clip(locs, a_min=ax, a_max=bx)
 
-        events = list(zip(locs, signs))
+        # events = list(zip(locs, signs))
+        events = locs 
 
         return events
 
@@ -257,8 +308,8 @@ class DerivativeEvent(EventDetector):
 
         if xlocs is not None:
             # N -> m
-            # N: [0 40] [50 70] [80 110] [120 150]
-            # m: [15 100], [30 90]
+            # N: [0 40] [50 70] [80 110] [120 150] labels domain
+            # m: [15 100], [30 90] events in signal
             # -> [15 40] [50 70] [80 100]
             # -> [30 40] [50 70] [80 90]
             # --> [15 40] [50 70] [80 90]
@@ -266,12 +317,47 @@ class DerivativeEvent(EventDetector):
             ### define labelled intervals for xlocs
             ### extract locs from labelled intervals
             ### for each set of labels define its own locs
-            for ax, bx in xlocs:
-                m = (locs >= ax) & (locs <= bx)
-                locs[m] = np.clip(locs[m], a_min=ax, a_max=bx)
+
+            i = np.arange(max(xlocs.max(), locs.max()))
+            D = xlocs[:, 1] - xlocs[:, 0]
+            i0 = xlocs[:, 0]
+
+            mask = (i[:, None] >= i0) & (i[:, None] < (i0 + D))
+            acts = mask.sum(1)
+
+            i = np.argwhere(acts > 0).ravel()
+            di = np.diff(i, append=i[-1] + 1)
+            # Jumps in activations
+            jacts = np.argwhere(di != 1).ravel()
+            J = [[_j[0], _j[-1] + 1] for _j in np.split(i, jacts + 1)]
+            J = np.asarray(J)
+
+            # Jumps in original locs
+            jlocs = np.unique(xlocs.ravel()).reshape(-1, 2)
+
+            # Corrected locs
+            clocs = np.empty((0, 2), dtype=int)
+            Jmax = J.max()
+
+            locs = np.repeat(locs, 2)[1:-1]
+
+            for x0, x1 in locs.reshape(-1, 2):
+                _jacts = jlocs[(jlocs > x0) & (jlocs < x1)]
+
+                if np.any(x0 >= J[:, 0]):
+                    _jacts = np.insert(_jacts, 0, x0)
+
+                if np.all(x1 <= J[:, 1]) or x1 == Jmax:
+                    _jacts = np.append(_jacts, x1)
+
+                _clocs = np.repeat(_jacts, 2)[1:-1].reshape(-1, 2)
+                clocs = np.concatenate((clocs, _clocs))
+
+            locs = clocs.ravel()
 
         # Events
-        events = list(zip(locs, signs))
+        # events = list(zip(locs, signs))
+        events = locs
 
         return events
 
@@ -301,8 +387,8 @@ class ROI:
 
             detector0 = detectors[0]
             # FIXME if not isfullyfit
-            events0 = detector0(x)
-            locs0, _ = zip(*events0)
+            locs0 = detector0(x)
+            # locs0, _ = zip(*events0)
 
             if detector0.is_continuous():
                 locs2d0 = []
