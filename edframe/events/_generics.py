@@ -205,7 +205,10 @@ class ThresholdEvent(EventDetector):
             clocs = np.empty((0, 2), dtype=int)
             Jmax = J.max()
 
-            for x0, x1 in locs.reshape(-1, 2):
+            locs2d = locs.reshape(-1, 2)
+            locs2d[:, 1] += 1
+
+            for x0, x1 in locs2d:
                 _jacts = jlocs[(jlocs > x0) & (jlocs < x1)]
 
                 if np.any(x0 >= J[:, 0]):
@@ -216,16 +219,18 @@ class ThresholdEvent(EventDetector):
 
                 _clocs = np.repeat(_jacts, 2)[1:-1].reshape(-1, 2)
                 clocs = np.concatenate((clocs, _clocs))
-            
-            # FIXME end-index is exclusive 
+
+            # FIXME end-index is exclusive
             # FIXME 0-length intervals
-            locs = clocs.ravel()
+            # clocs[:, 1] -= 1
+            # locs = clocs.ravel()
+            locs = np.unique(clocs.ravel())
 
             # for ax,bx in xlocs:
             #     ilocs = np.clip(locs, a_min=ax, a_max=bx)
 
         # events = list(zip(locs, signs))
-        events = locs 
+        events = locs
 
         return events
 
@@ -341,7 +346,10 @@ class DerivativeEvent(EventDetector):
 
             locs = np.repeat(locs, 2)[1:-1]
 
-            for x0, x1 in locs.reshape(-1, 2):
+            locs2d = locs.reshape(-1, 2)
+            # locs2d[:, 1] += 1
+
+            for x0, x1 in locs2d:
                 _jacts = jlocs[(jlocs > x0) & (jlocs < x1)]
 
                 if np.any(x0 >= J[:, 0]):
@@ -353,7 +361,8 @@ class DerivativeEvent(EventDetector):
                 _clocs = np.repeat(_jacts, 2)[1:-1].reshape(-1, 2)
                 clocs = np.concatenate((clocs, _clocs))
 
-            locs = clocs.ravel()
+            # clocs[:, 1] -= 1
+            locs = np.unique(clocs.ravel())
 
         # Events
         # events = list(zip(locs, signs))
