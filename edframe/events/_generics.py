@@ -306,23 +306,18 @@ class DerivativeEvent(EventDetector):
             locs = np.append(locs, len(x) - 1)
 
         # Signs
-        signs = np.sign(dx[locs])
+        # signs = np.sign(dx[locs])
         # signs = np.where(signs < 0, 0, 1)
         locs *= self._window_size
         assert locs[-1] < len(x) * self._window_size
 
-        if xlocs is not None:
-            # N -> m
-            # N: [0 40] [50 70] [80 110] [120 150] labels domain
-            # m: [15 100], [30 90] events in signal
-            # -> [15 40] [50 70] [80 100]
-            # -> [30 40] [50 70] [80 90]
-            # --> [15 40] [50 70] [80 90]
-            ### ALG:
-            ### define labelled intervals for xlocs
-            ### extract locs from labelled intervals
-            ### for each set of labels define its own locs
+        locs = np.repeat(locs, 2)[1:-1].reshape(-1, 2)
 
+        # if len(locs) == 1 and\
+        #     np.all((locs[:, 1] - locs[:, 0]) == self._window_size):
+        #     return locs
+
+        if xlocs is not None:
             i = np.arange(max(xlocs.max(), locs.max()))
             D = xlocs[:, 1] - xlocs[:, 0]
             i0 = xlocs[:, 0]
@@ -338,18 +333,13 @@ class DerivativeEvent(EventDetector):
             J = np.asarray(J)
 
             # Jumps in original locs
-            jlocs = np.unique(xlocs.ravel()).reshape(-1, 2)
+            jlocs = np.unique(xlocs.ravel())
 
             # Corrected locs
             clocs = np.empty((0, 2), dtype=int)
             Jmax = J.max()
 
-            locs = np.repeat(locs, 2)[1:-1]
-
-            locs2d = locs.reshape(-1, 2)
-            # locs2d[:, 1] += 1
-
-            for x0, x1 in locs2d:
+            for x0, x1 in locs:
                 _jacts = jlocs[(jlocs > x0) & (jlocs < x1)]
 
                 if np.any(x0 >= J[:, 0]):
@@ -361,14 +351,11 @@ class DerivativeEvent(EventDetector):
                 _clocs = np.repeat(_jacts, 2)[1:-1].reshape(-1, 2)
                 clocs = np.concatenate((clocs, _clocs))
 
-            # clocs[:, 1] -= 1
-            locs = np.unique(clocs.ravel())
+            # FIXME allow <window_size loss
+            D2 = clocs[:, 1] - clocs[:, 0]
+            locs = clocs[D2 >= self._window_size]
 
-        # Events
-        # events = list(zip(locs, signs))
-        events = locs
-
-        return events
+        return locs
 
 
 class ROI:
@@ -392,45 +379,37 @@ class ROI:
     ) -> PowerSample | DataSet | np.ndarray:
 
         def _crop(x: PowerSample | np.ndarray, detectors):
-            # if x.isfullyfit():
-
+            roi = []
             detector0 = detectors[0]
             # FIXME if not isfullyfit
-            locs0 = detector0(x)
-            # locs0, _ = zip(*events0)
-
-            if detector0.is_continuous():
-                locs2d0 = []
-
-                for i in range(1, len(locs0)):
-                    a = locs0[i - 1]
-                    b = locs0[i]
-                    locs2d0.append((a, b))
-            else:
-                locs2d0 = [locs0[i:i + 2] for i in range(0, len(locs0), 2)]
-
-            del locs0
-
-            roi = []
+            locs2d0 = detector0(x)
+            # print('-'*30)
+            # print(x.locs)
+            # print(locs2d0)
+            # print('-'*30)
 
             for a0, b0 in locs2d0:
                 xab0 = x[a0:b0]
 
-                if len(detectors) > 1 and len(xab0) > 1:
-                    roi.extend(_crop(xab0, detectors[1:]))
+                # print(a0, b0)
+                # print(x.locs)
+                # print(xab0.locs)
+                # print('>>>\n')
+
+                if not xab0.isfullyfit():
+                    print('\nooo', a0, b0, xab0.locs, x.locs, '\n\n')
+
+                if len(detectors) > 1:
+                    _roi = _crop(xab0, detectors[1:])
                 else:
-                    roi.append(xab0)
+                    _roi = xab0
+
+                if isinstance(_roi, type(x)):
+                    roi.append(_roi)
+                else:
+                    roi.extend(_roi)
 
             return roi
-
-            # roi = []
-
-            # for a, b in x.locs:
-            #     # print(a, b)
-            #     # print(x[a:b].locs, x[a:b].isfullyfit())
-            #     roi.extend(_crop(x[a:b], detectors))
-
-            # return roi
 
         if isinstance(x, DataSet):
             # TODO the same style for event detectors
