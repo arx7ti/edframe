@@ -162,12 +162,14 @@ class Composer:
         n_samples: int,
         n_classes: int,
         n_rolls: int = 1,
+        dn: float = 0.1,
     ) -> np.ndarray:
         window_size = self.dataset.values.shape[1]  # TODO if 2d
+        dn = round(dn * window_size)
 
         if n_rolls > 0:
-            rolls = self._rng.randint(-window_size + 1,
-                                      window_size,
+            rolls = self._rng.randint(-window_size + dn + 1,
+                                      window_size - dn,
                                       size=(n_samples, n_rolls, n_classes - 1))
         else:
             rolls = np.zeros((n_samples, 1, n_classes - 1))
