@@ -833,14 +833,29 @@ class PowerSample(Generic):
             components = components[..., ab]
 
         # FIXME
-        if not self.isfullyfit():
-            a = 0 if ab.start is None else ab.start
-            b = data.shape[-1] - a if ab.stop is None else ab.stop
-            locs = np.clip(self.locs, a_min=a, a_max=b)
-        else:
-            locs = None
+        a = 0 if ab.start is None else ab.start
+        b = self.data.shape[-1] if ab.stop is None else ab.stop
 
-        return self.update(data=data, _locs=locs, _components=components)
+        b = np.minimum(b, self.locs[:, 1])
+        locs0 = np.maximum(0, self.locs[:, 0] - a)
+        locs0 = np.clip(locs0, a_min=0, a_max=b - a)
+        locs = np.column_stack((locs0, b - a))
+        mask = np.diff(locs, axis=1).ravel() > 0
+        locs = locs[mask]
+        # TODO in case of future another roll? if it will become zero
+        # e.g. now half is rolled and label is kept, how to deal with further roll
+        # solution must be automatic, i.e. label drop if overrolled
+        labels = [self.labels[i] for i in np.argwhere(mask).ravel()]
+
+        # if np.any((locs[:, 1] - locs[:, 0]) < 160):
+        #     print('\n>>>', ab, '\n\n', self.locs, '\n\n', locs, '>>>\n')
+        # else:
+        # locs = self.locs
+
+        return self.update(data=data,
+                           _locs=locs,
+                           _labels=labels,
+                           _components=components)
 
     def isfullyfit(self):
         return np.all((self.locs[:, 0] == 0) & (self.locs[:, 1] == len(self)))
@@ -1076,10 +1091,10 @@ class VI(PowerSample):
             data[1, :n] = 0
             # lmask[:n] = False
 
-        if self.haslocs():
-            locs = np.clip(self.locs + n, a_min=0, a_max=self.timesize)
-        else:
-            locs = None
+        # if self.haslocs():
+        locs = np.clip(self.locs + n, a_min=0, a_max=self.timesize)
+        # else:
+        #     locs = None
 
         return self.update(data=data, _locs=locs)
 
@@ -1105,10 +1120,10 @@ class I(PowerSample):
             data[:n] = 0
             # lmask[:n] = False
 
-        if self.haslocs():
-            locs = np.clip(self.locs + n, a_min=0, a_max=self.timesize)
-        else:
-            locs = None
+        # if self.haslocs():
+        locs = np.clip(self.locs + n, a_min=0, a_max=self.timesize)
+        # else:
+        #     locs = None
 
         return self.update(data=data, _locs=locs)
 
