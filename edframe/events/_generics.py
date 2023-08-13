@@ -302,14 +302,18 @@ class DerivativeEvent(EventDetector):
             locs = np.sort(locs_upd)
 
         # Calibration
+        # print('1>>>', locs)
         if locs[-1] < len(x) - 1:
             locs = np.append(locs, len(x) - 1)
+        elif len(x) == 1:
+            locs = np.append(locs, 1)
 
         # Signs
         # signs = np.sign(dx[locs])
         # signs = np.where(signs < 0, 0, 1)
         locs *= self._window_size
-        assert locs[-1] < len(x) * self._window_size
+        # print('2>>>', locs)
+        assert locs[-1] <= len(x) * self._window_size
 
         locs = np.repeat(locs, 2)[1:-1].reshape(-1, 2)
 
@@ -321,7 +325,6 @@ class DerivativeEvent(EventDetector):
             i = np.arange(max(xlocs.max(), locs.max()))
             D = xlocs[:, 1] - xlocs[:, 0]
             i0 = xlocs[:, 0]
-
             mask = (i[:, None] >= i0) & (i[:, None] < (i0 + D))
             acts = mask.sum(1)
 
@@ -353,7 +356,10 @@ class DerivativeEvent(EventDetector):
 
             # FIXME allow <window_size loss
             D2 = clocs[:, 1] - clocs[:, 0]
+            # print(self._window_size // 4, self._window_size)
+            # locs = clocs[D2 >= self._window_size // 4]
             locs = clocs[D2 >= self._window_size]
+            # print(locs)
 
         return locs
 
@@ -388,7 +394,9 @@ class ROI:
             # print(locs2d0)
             # print('-'*30)
 
+            # print(locs2d0)
             for a0, b0 in locs2d0:
+                # print(a0, b0)
                 xab0 = x[a0:b0]
 
                 # print(a0, b0)
@@ -396,8 +404,8 @@ class ROI:
                 # print(xab0.locs)
                 # print('>>>\n')
 
-                if not xab0.isfullyfit():
-                    print('\nooo', a0, b0, xab0.locs, x.locs, '\n\n')
+                # if not xab0.isfullyfit():
+                #     print('\nooo', a0, b0, xab0.locs, x.locs, '\n\n')
 
                 if len(detectors) > 1:
                     _roi = _crop(xab0, detectors[1:])
