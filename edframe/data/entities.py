@@ -446,8 +446,11 @@ class Components(Backref):
     All methods except pop and setitem produce new copies with inherited legacy from the previous object
     """
 
-    __default_data__ = []
     __verbose__ = "{cls}(N={nc})"
+
+    @property
+    def __default_data__(self):
+        return np.empty((0, *self.backref.values.shape))
 
     # def _check_values(values):
     #     if not abby.is_bearable(values, (list[np.ndarray],\
@@ -471,13 +474,19 @@ class Components(Backref):
     def __getitem__(
         self, indexer: np.ndarray | list[int] | set[int] | tuple[int, ...]
     ) -> Backref:
-        return self.update(data=self.data[indexer])
+        data = self.data[indexer]
+        return self.update(data=data)
 
     def __len__(self):
         return len(self.data)
 
     @property
     def data(self) -> np.ndarray:
+        if (len(self._data) == 0 and self.backref.labels is None)\
+            or (len(self._data) == 0 and self.backref.labels is not None):
+
+            return self.backref.values[None]
+
         return self._data
 
     @data.setter
@@ -502,7 +511,13 @@ class Components(Backref):
         return self.data
 
     def count(self):
-        return len(self)
+        if len(self._data) == 0 and self.backref.labels is None:
+            return 1
+
+        if len(self._data) == 0 and self.backref.labels is not None:
+            return len(self.backref.labels)
+
+        return len(self._data)
 
     def allow_transform(self, status: bool = True):
         self._is_allowed_transform = status
@@ -511,14 +526,14 @@ class Components(Backref):
         return self._is_allowed_transform
 
     def add(self, components: Components):
-        values = {}
-
         if isinstance(components, Components):
-            values = {**self.data, **components.data}
+            data = np.concatenate((self.data, components.data), axis=0)
+        elif isinstance(components, np.ndarray):
+            data = np.concatenate((self.data, components), axis=0)
         else:
             raise ValueError
 
-        return self.update(data=values)
+        return self.update(data=data)
 
     # def apply(
     #     self,
@@ -769,16 +784,11 @@ class PowerSample(Generic):
 
     @property
     def locs(self):
-        if self.haslocs():
+        if self._locs is not None:
             return self._locs
 
-        n_labels = self.n_labels
-
-        if n_labels == 0:
-            n_labels = 1
-
         # NOTE if n_labels = 0 and aggregated with n_labels > 0
-        return np.asarray([[0, len(self.values)]] * n_labels)
+        return np.asarray([[0, len(self.values)]] * max(1, self.n_labels))
 
     @property
     def n_labels(self):
@@ -825,12 +835,7 @@ class PowerSample(Generic):
         if not isinstance(ab, slice):
             raise ValueError
 
-        data = self.data[..., ab]
-        components = self.components
-
-        # TODO
-        if components.count() > 0:
-            components = components[..., ab]
+        # components = self.components
 
         # FIXME
         a = 0 if ab.start is None else ab.start
@@ -851,11 +856,20 @@ class PowerSample(Generic):
         #     print('\n>>>', ab, '\n\n', self.locs, '\n\n', locs, '>>>\n')
         # else:
         # locs = self.locs
+        # print('>',locs, labels, components.count())
+
+        # TODO
+        components = self.components
+        if components.count() > 0:
+            idxs = [i for i in np.argwhere(mask).ravel()]
+            components = components[idxs, ab]
+
+        data = self.data[..., ab]
 
         return self.update(data=data,
                            _locs=locs,
                            _labels=labels,
-                           _components=components)
+                           components=components)
 
     def isfullyfit(self):
         return np.all((self.locs[:, 0] == 0) & (self.locs[:, 1] == len(self)))
@@ -982,6 +996,7 @@ class VI(PowerSample):
         locs: Optional[np.ndarray] = None,
         components: Optional[np.ndarray] = None,
         aggregation: Optional[str] = '+',
+        blind_zone: Optional[float] = 0.25,
         **kwargs: Any,
     ):
         if len(v) != len(i):
@@ -998,7 +1013,9 @@ class VI(PowerSample):
                          components=components,
                          aggregation=aggregation,
                          **kwargs)
+        self._blind_zone = blind_zone
         self._sync = False or len(data.shape) == 3
+        self._period = None
 
     def __add__(self, sample):
         return self.agg(sample)
@@ -1013,10 +1030,37 @@ class VI(PowerSample):
         labels = self.labels + sample.labels
         locs = np.concatenate((self.locs, sample.locs))
         # TODO assure that n locs == n labels
-        return self.update(v=v, i=i, labels=labels, _locs=locs)
+        # components = np.stack((self.i, sample.i), axis=0)
+        # components = self.components.add()
+        components = self.components.add(sample.components)
+        return self.update(v=v,
+                           i=i,
+                           labels=labels,
+                           _locs=locs,
+                           components=components,
+                           _sync=self.is_sync() & sample.is_sync())
 
     def is_sync(self):
         return self._sync
+
+    def period(self, fmt: str = "samples"):
+        if not fmt == "samples":
+            raise NotImplementedError
+
+        return self._period
+
+    @property
+    def locs(self):
+        locs = super().locs
+
+        # FIXME by request not automatic
+        if self._period is not None and self._blind_zone is not None:
+            p = self.period("samples")
+            visibility = 1. - locs % p / p
+            locs = locs // p * p
+            locs = np.where(visibility > self._blind_zone, locs, locs + p)
+
+        return locs
 
     @property
     def v(self):
@@ -1063,22 +1107,24 @@ class VI(PowerSample):
     def sync(self):
         fitps = FITPS()
         v, i = fitps(self.v, self.i, fs=self.fs)
+        period = v.shape[1]
         v, i = v.ravel(), i.ravel()
         data = np.stack((v, i), axis=0)
 
         if self.f0 is None:
             return self.update(data=data,
                                _sync=True,
-                               _f0=round(self.fs / v.shape[1]))
+                               _f0=round(self.fs / period),
+                               _period=period)
 
-        return self.update(data=data, _sync=True)
+        return self.update(data=data, _sync=True, _period=period)
 
     def roll(self, n: int) -> PowerSample:
         if abs(n) >= len(self):
             raise ValueError
 
         if n == 0:
-            return self.update()
+            return self.copy()
 
         period = round(self.fs / self.f0)
         data = roll(self.data, abs(n) // period * period)
@@ -1107,7 +1153,7 @@ class I(PowerSample):
             raise ValueError
 
         if n == 0:
-            return self.update()
+            return self.copy()
 
         period = round(self.fs / self.f0)
         data = roll(self.data, n // period * period)
@@ -1145,7 +1191,8 @@ class I(PowerSample):
                          components=components,
                          aggregation=aggregation,
                          **kwargs)
-        self._sync = len(i.shape) == 2
+        self._sync = False or len(i.shape) == 2
+        self._period = None
 
     def __add__(self, sample):
         return self.agg(sample)
