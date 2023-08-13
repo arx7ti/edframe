@@ -425,6 +425,8 @@ class FourierModel(WaveformModel):
 
         for i, label in zip(X, y):
             sample = I(i=i, fs=self._fs, f0=self._f0, labels=[str(label)])
+            # TODO remove underscore from _{name} arguments in _update() method
+            sample = sample.update(_sync=True, _period=len(self._t_axis))
             samples.append(sample)
 
         dataset = HIDataSet(samples)
