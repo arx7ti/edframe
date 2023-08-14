@@ -38,6 +38,10 @@ class FITPS:
 
         vf = v
         v0 = self._compute_roots(vf)
+
+        if len(v0) < 2:
+            raise ValueError
+
         dv = self._compute_shifts(vf, v0)
         del vf
 
