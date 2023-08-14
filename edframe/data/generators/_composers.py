@@ -162,7 +162,7 @@ class Composer:
         n_samples: int,
         n_classes: int,
         n_rolls: int = 1,
-        dn: float = 0.1,
+        dn: float = 0.,
     ) -> np.ndarray:
         window_size = self.dataset.values.shape[1]  # TODO if 2d
         dn = round(dn * window_size)
@@ -186,6 +186,7 @@ class Composer:
         n_reps: np.ndarray = None,
         n_rolls: int = 1,
         keep_components: bool = False,
+        dn=0.,
     ):
         samples = []
         I = self.sample(n_samples=n_samples,
@@ -194,7 +195,8 @@ class Composer:
 
         R = self.schedule(n_samples=len(I),
                           n_classes=n_classes,
-                          n_rolls=n_rolls)
+                          n_rolls=n_rolls,
+                          dn=dn)
 
         for i, r in tqdm(zip(I, R), total=len(I)):
             samples.extend(self.compose(i, r, keep_components=keep_components))
