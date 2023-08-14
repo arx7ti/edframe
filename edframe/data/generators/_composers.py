@@ -157,26 +157,43 @@ class Composer:
 
         return I
 
-    def schedule(
+    def roll(
         self,
-        n_samples: int,
-        n_classes: int,
-        n_rolls: int = 1,
+        combs: list[list[int]],
+        n_rolls: int = 0,
         dn: float = 0.,
-    ) -> np.ndarray:
+    ) -> list[list[int]]:
+        rolls = []
         window_size = self.dataset.values.shape[1]  # TODO if 2d
         dn = round(dn * window_size)
 
-        if n_rolls > 0:
-            rolls = self._rng.randint(-window_size + dn + 1,
-                                      window_size - dn,
-                                      size=(n_samples, n_rolls, n_classes - 1))
-        else:
-            rolls = np.zeros((n_samples, 1, n_classes - 1))
+        for comb in combs:
+            if n_rolls > 0:
+                _rolls = set()
+                n_rolls_max = 2 * (window_size - dn) - 1
+                # -1 stands for len(combs) - 1
+                n_combs_max = math.comb(
+                    len(comb) + n_rolls_max - 2, n_rolls_max)
+
+                while len(_rolls) < min(n_rolls, n_combs_max):
+                    __rolls = self._rng.choice(
+                        range(-window_size + dn + 1, window_size - dn),
+                        len(comb) - 1)
+                    __rolls = [0] + __rolls
+                    __rolls = tuple(__rolls)
+
+                    if __rolls not in _rolls:
+                        _rolls.add(__rolls)
+
+                _rolls = list(_rolls)
+            else:
+                _rolls = [[0] * len(comb)]
+
+            rolls.append(_rolls)
 
         return rolls
 
-    def compose(self, idxs, rolls, keep_components: bool = False):
+    def compose(self, idxs, rolls):
         raise NotImplementedError
 
     def make_samples(
@@ -185,21 +202,16 @@ class Composer:
         n_classes: int = 2,
         n_reps: np.ndarray = None,
         n_rolls: int = 1,
-        keep_components: bool = False,
         dn=0.,
     ):
         samples = []
         I = self.sample(n_samples=n_samples,
                         n_classes=n_classes,
                         n_reps=n_reps)
-
-        R = self.schedule(n_samples=len(I),
-                          n_classes=n_classes,
-                          n_rolls=n_rolls,
-                          dn=dn)
+        R = self.roll(I, n_rolls=n_rolls, dn=dn)
 
         for i, r in tqdm(zip(I, R), total=len(I)):
-            samples.extend(self.compose(i, r, keep_components=keep_components))
+            samples.extend(self.compose(i, r))
 
         dataset = self.dataset.new(samples)
 
@@ -208,7 +220,7 @@ class Composer:
 
 class HComposer(Composer):
 
-    def compose(self, idxs, rolls, keep_components: bool = False):
+    def compose(self, idxs, rolls):
         samples = []
         components = [self.dataset[i] for i in idxs]
         sample0 = components.pop(0)
