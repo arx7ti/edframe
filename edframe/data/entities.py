@@ -1014,14 +1014,21 @@ class VI(PowerSample):
                          aggregation=aggregation,
                          **kwargs)
         self._blind_zone = blind_zone
+        self._rounded = False
         self._sync = False or len(data.shape) == 3
         self._period = None
 
     def __add__(self, sample):
-        return self.agg(sample)
+        if isinstance(sample, VI):
+            return self.agg(sample)
+        else:
+            return self.update(i=self.i + sample)
 
     def __radd__(self, sample):
-        return self.agg(sample)
+        if isinstance(sample, VI):
+            return self.agg(sample)
+        else:
+            return self.update(i=self.i + sample)
 
     def agg(self, sample: VI) -> VI:
         # TODO fix v update as well during transform
@@ -1049,12 +1056,24 @@ class VI(PowerSample):
 
         return self._period
 
+    def is_rounded(self):
+        return self._rounded
+
+    def rounding(self, flag: bool = True) -> None:
+        if not self.is_sync():
+            raise ValueError
+
+        if self._blind_zone is None:
+            raise ValueError
+
+        return self.update(_rounded=flag)
+
     @property
     def locs(self):
         locs = super().locs
-
         # FIXME by request not automatic
-        if self._period is not None and self._blind_zone is not None:
+
+        if self.is_rounded():
             p = self.period("samples")
             visibility = 1. - locs % p / p
             locs = locs // p * p
