@@ -57,9 +57,7 @@ class FITPS:
         if locs is not None:
             locs = self._transform_locs(locs, v0)
             return v, i, locs
-            # return power_sample.update(v=v, i=i, locs=locs)
         else:
-            # return power_sample.update(v=v, i=i)
             return v, i
 
     @staticmethod
