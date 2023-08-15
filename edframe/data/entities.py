@@ -831,6 +831,7 @@ class PowerSample(Generic):
     # TODO 4. if labels and components
 
     @State.check
+    # FIXME not working if np.random.choice(dataset, n)
     def __getitem__(self, ab: slice):
         if not isinstance(ab, slice):
             raise ValueError
@@ -1250,6 +1251,7 @@ class DataSet(Generic):
     __low__ = False
     __high__ = False
     events = Events
+    # TODO if single object called then keep features
     features = Features
 
     # sample = PowerSample
