@@ -1258,7 +1258,7 @@ class DataSet(Generic):
 
     @property
     def class_names(self):
-        return self._class_names
+        return list(self._class_names)
 
     @property
     def n_classes(self):
@@ -1266,6 +1266,7 @@ class DataSet(Generic):
 
     @property
     def labels(self):
+        # TODO as a function, add return type e.g. 2d matrix, 1d list[str]
         return self._labels
 
     @property
@@ -1382,6 +1383,7 @@ class DataSet(Generic):
         return len(self)
 
     def random(self):
+        # FIXME if self[n, :] then it doesn't work
         idx = self._rng.randint(0, self.count())
         return self[idx]
 
