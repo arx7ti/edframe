@@ -5,11 +5,13 @@ from scipy.stats import gmean
 
 
 def spectral_centroid(x: np.ndarray, normalized: bool = True) -> float:
-    a = np.abs(np.fft.rfft(x))[1:]
-    s = (a * np.arange(1, len(a) + 1)).sum() / a.sum()
+    a = np.abs(np.fft.rfft(x, axis=-1))[..., 1:]
+    arange = np.arange(1, a.shape[-1] + 1)
+    arange = np.expand_dims(arange, axis=tuple(range(len(a.shape) - 1)))
+    s = (a * arange).sum(-1) / a.sum(-1)
 
     if normalized:
-        s /= len(x)
+        s /= x.shape[-1]
 
     return s
 
