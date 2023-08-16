@@ -150,6 +150,7 @@ class Composer:
         loss = n_samples - len(I)
 
         if loss > 0:
+            # FIXME not correct
             warnings.warn('%d samples were not obtained due to '
                           'combinatorial limit.' % loss)
 
@@ -225,6 +226,7 @@ class HComposer(Composer):
         components = [self.dataset[i] for i in idxs]
         sample0 = components.pop(0)
 
+        # FIXME if 1 component 
         for r in rolls:
             sample = reduce(add, [x.roll(rx) for x, rx in zip(components, r)])
             samples.append(sample0 + sample)
