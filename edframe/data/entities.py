@@ -1258,11 +1258,11 @@ class DataSet(Generic):
 
     @property
     def class_names(self):
-        return list(self._class_names)
+        return self._class_names
 
     @property
     def n_classes(self):
-        return len(self._class_names)
+        return len(self.class_names)
 
     @property
     def labels(self):
@@ -1316,7 +1316,7 @@ class DataSet(Generic):
             }
             self._n_components = max(self._n_components, len(_labels))
 
-        self._class_names = set(it.chain(*class_labels))
+        self._class_names = sorted(list(set(it.chain(*class_labels)))) # Really stange behavior
         cn_dtypes = {type(cn) for cn in self._class_names}
 
         # TODO move labels type check inside sample's class
@@ -1331,7 +1331,7 @@ class DataSet(Generic):
         if cn_dtype is not str:
             raise TypeError("Class names must be str")
 
-        mlbin = MultiLabelBinarizer(classes=list(self._class_names))
+        mlbin = MultiLabelBinarizer(classes=self._class_names)
         dtype = dtypes.pop()
 
         if dtype is str:
@@ -1343,7 +1343,7 @@ class DataSet(Generic):
         else:
             raise ValueError
 
-        y = np.zeros((len(data), len(self._class_names)),
+        y = np.zeros((len(data), self.n_classes),
                      dtype=float if problem_type == "regression" else int)
         mask = np.nonzero(mlbin.fit_transform(labels) > 0)
 
@@ -1361,15 +1361,42 @@ class DataSet(Generic):
 
     def __getitem__(self, indexer):
         # TODO everywhere: if len == 1 then just item
-        if abby.is_bearable(indexer, Iterable[int]):
-            data = [self.data[i] for i in indexer]
-        else:
+        if abby.is_bearable(indexer, Iterable):
+            assert len(indexer) > 0
+            dtype = type(indexer[0])
+
+            if isinstance(indexer, np.ndarray):
+                assert len(indexer.shape) == 1
+
+            if dtype == str:
+                if not self.is_standalone():
+                    raise ValueError
+
+                data = [x for x in self.data if x.label in indexer]
+            else:
+                data = [self.data[i] for i in indexer]
+        elif isinstance(indexer, str):
+            data = [x for x in self.data if x.label == indexer]
+        elif isinstance(indexer, int|slice):
             data = self.data[indexer]
+        else:
+            raise ValueError
 
         if isinstance(data, Iterable):
             return self.update(data=data)
-        else:
-            return data
+
+        return data
+
+    def get(
+        self,
+        class_name: Optional[str] = None,
+        class_name__in: Optional[list[str]]=None,
+    ) -> DataSet:
+        if class_name is not None:
+            return self[class_name]
+
+        if class_name__in is not None:
+            return self[class_name__in]
 
     def __len__(self):
         return len(self.data)
@@ -1383,6 +1410,7 @@ class DataSet(Generic):
         return len(self)
 
     def random(self):
+        # FIXME if called together with .get() multiple time then it is not random
         # FIXME if self[n, :] then it doesn't work
         idx = self._rng.randint(0, self.count())
         return self[idx]
@@ -1413,7 +1441,7 @@ class DataSet(Generic):
         return values
 
     def is_standalone(self):
-        return np.all(self.labels.sum(0) / self.n_classes == 1)
+        return np.all(self.labels.sum(1) == 1)
 
     def train_test_split(self, test_size: float = 0.3):
         if self.is_standalone():
