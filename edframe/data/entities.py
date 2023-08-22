@@ -811,8 +811,9 @@ class PowerSample(Generic):
 
     @property
     def label(self):
-        if len(self.labels) > 1:
-            raise AttributeError
+        if self.labels is not None:
+            if len(self.labels) > 1:
+                raise AttributeError
 
         return self._labels[0]
 
@@ -1246,6 +1247,70 @@ class I(PowerSample):
         self.i = i
 
 
+class P(PowerSample):
+    __low__ = True
+
+    def roll(self, n: int) -> PowerSample:
+        if abs(n) >= len(self):
+            raise ValueError
+
+        if n == 0:
+            return self.copy()
+
+        data = roll(self.data, n)
+
+        if n < 0:
+            data[n:] = 0
+        else:
+            data[:n] = 0
+
+        # FIXME if no ROI inside
+        locs = np.clip(self.locs + n, a_min=0, a_max=self.timesize)
+
+        return self.update(data=data, _locs=locs)
+
+    def __init__(
+        self,
+        p,
+        fs,
+        labels: Optional[Union[list[str], dict[str, float]]] = None,
+        components: Optional[np.ndarray] = None,
+        aggregation: Optional[str] = '+',
+        **kwargs: Any,
+    ):
+        super().__init__(data=p,
+                         fs=fs,
+                         fs_type="low",
+                         labels=labels,
+                         components=components,
+                         aggregation=aggregation,
+                         **kwargs)
+
+    def __add__(self, sample):
+        return self.agg(sample)
+
+    def __radd__(self, sample):
+        return self.agg(sample)
+
+    def agg(self, sample: P) -> P:
+        p = self.p + sample.p
+        labels = self.labels + sample.labels
+        locs = np.concatenate((self.locs, sample.locs))
+        return self.update(p=p, labels=labels, _locs=locs)
+
+    @property
+    def p(self) -> np.ndarray:
+        return self.data
+
+    @p.setter
+    def p(self, p) -> np.ndarray:
+        self.data = p
+
+    @property
+    def values(self) -> np.ndarray:
+        return self.p
+
+
 class DataSet(Generic):
     # TODO for each subclass its own implementation
     __low__ = False
@@ -1316,7 +1381,8 @@ class DataSet(Generic):
             }
             self._n_components = max(self._n_components, len(_labels))
 
-        self._class_names = sorted(list(set(it.chain(*class_labels)))) # Really stange behavior
+        self._class_names = sorted(list(set(
+            it.chain(*class_labels))))  # Really stange behavior
         cn_dtypes = {type(cn) for cn in self._class_names}
 
         # TODO move labels type check inside sample's class
@@ -1377,7 +1443,8 @@ class DataSet(Generic):
                 data = [self.data[i] for i in indexer]
         elif isinstance(indexer, str):
             data = [x for x in self.data if x.label == indexer]
-        elif isinstance(indexer, int|slice):
+        elif isinstance(indexer, int | slice):
+            # FIXME any int-like object 
             data = self.data[indexer]
         else:
             raise ValueError
@@ -1390,7 +1457,7 @@ class DataSet(Generic):
     def get(
         self,
         class_name: Optional[str] = None,
-        class_name__in: Optional[list[str]]=None,
+        class_name__in: Optional[list[str]] = None,
     ) -> DataSet:
         if class_name is not None:
             return self[class_name]
