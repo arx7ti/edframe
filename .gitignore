@@ -168,4 +168,4 @@ cython_debug/
 .vscode/
 
 .DS_Store
-.npy
+*.npy
