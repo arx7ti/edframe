@@ -1,5 +1,5 @@
 import numpy as np
-from edframe.features._scalar import rms
+# from edframe.features._scalar import rms
 
 
 def fryze(v: np.ndarray, i: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
