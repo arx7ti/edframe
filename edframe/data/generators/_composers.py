@@ -205,6 +205,9 @@ class Composer:
         n_rolls: int = 1,
         dn=0.,
     ):
+        if n_classes > self.dataset.n_classes:
+            raise ValueError
+
         samples = []
         I = self.sample(n_samples=n_samples,
                         n_classes=n_classes,
@@ -223,7 +226,7 @@ class HComposer(Composer):
 
     def compose(self, idxs, rolls):
         samples = []
-        components = [self.dataset[i] for i in idxs]
+        components = [self.dataset[int(i)] for i in idxs]
         sample0 = components.pop(0)
 
         # FIXME if 1 component 
