@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from sklearn.metrics import f1_score, accuracy_score, precision_score, recall_score
+from sklearn.metrics import f1_score, accuracy_score, precision_score, recall_score, roc_auc_score
 
 from typing import Any
 
@@ -116,3 +116,8 @@ class Precision(Metric):
 class Recall(Metric):
     def metric(self, y_true: np.ndarray, y_pred: np.ndarray):
         return recall_score(y_true, y_pred, **self._kwargs)
+
+class ROCAUC(Metric):
+    def metric(self, y_true: np.ndarray, y_pred: np.ndarray):
+        # TODO predict_proba
+        return roc_auc_score(y_true, y_pred, **self._kwargs)
