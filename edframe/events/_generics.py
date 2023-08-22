@@ -52,8 +52,8 @@ class EventDetector:
         window_size: int,
         verbose_name: Optional[str] = None,
     ) -> None:
-        if not isinstance(window, Callable):
-            raise ValueError
+        # if not isinstance(window, Callable):
+        #     raise ValueError
 
         if not self.__low__ and not self.__high__:
             raise ValueError
@@ -148,7 +148,7 @@ class ThresholdEvent(EventDetector):
 
     def __init__(
         self,
-        window: Callable,
+        window: Callable=None,
         alpha: float = 0.005,
         above: bool = True,
         window_size: int = 80,
@@ -184,15 +184,17 @@ class ThresholdEvent(EventDetector):
 
         self.check_fn(x, **kwargs)
 
-        x = self._striding_window_view(x)
-        x = np.apply_along_axis(self._window, axis=1, arr=x)
+        if self._window is not None:
+            x = self._striding_window_view(x)
+            x = np.apply_along_axis(self._window, axis=1, arr=x)
+
         x = np.where(x > self._alpha if self._above else x < self._alpha, 1, 0)
         dx = np.diff(x, prepend=0)
 
         # signs = np.sign(dx)
         locs0 = np.argwhere(dx > 0).ravel()
         locs1 = np.argwhere(dx < 0).ravel()
-        locs = np.concatenate((locs0, locs1))
+        locs = np.sort(np.concatenate((locs0, locs1)))
 
         if len(locs) == 0:
             return locs
@@ -202,7 +204,9 @@ class ThresholdEvent(EventDetector):
             locs = np.append(locs, len(x))
 
         # signs = signs[locs]
-        locs *= self._window_size
+        if self._window is not None:
+            locs *= self._window_size
+
         locs = locs.reshape(-1, 2)
 
         if xlocs is not None:
