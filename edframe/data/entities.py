@@ -996,7 +996,7 @@ class VI(PowerSample):
 
         if target == "active":
             # FIXME resolve import issues
-            v = self.components.map(lambda x: rms(fryze(x)[0]))
+            v = self.components.map(lambda x: rms(fryze(self.v, x)[0]))
             labels = dict(zip(self.labels, v))
             return self.update(labels=labels)
         else:
@@ -1266,7 +1266,7 @@ class P(PowerSample):
     __low__ = True
 
     def roll(self, n: int) -> PowerSample:
-        if abs(n) >= len(self):
+        if abs(n) >= self.timesize:
             raise ValueError
 
         if n == 0:
@@ -1283,6 +1283,18 @@ class P(PowerSample):
         locs = np.clip(self.locs + n, a_min=0, a_max=self.timesize)
 
         return self.update(data=data, _locs=locs)
+
+    def reg_labels(self):
+        if self.components.count() == 0:
+            raise ValueError
+
+        labels = dict(
+            zip(self.labels, [
+                x.sum() * (l[1] - l[0])
+                for x, l in zip(self.components.values, self.locs)
+            ]))
+
+        return self.update(labels=labels)
 
     def __init__(
         self,
@@ -1308,9 +1320,16 @@ class P(PowerSample):
         return self.agg(sample)
 
     def agg(self, sample: P) -> P:
+        # FIXME assure both clf or both reg
         p = self.p + sample.p
-        labels = self.labels + sample.labels
+
+        if isinstance(self.labels, dict) or isinstance(sample.labels, dict):
+            labels = {**self.labels, **sample.labels}
+        else:
+            labels = self.labels + sample.labels
+
         locs = np.concatenate((self.locs, sample.locs))
+
         return self.update(p=p, labels=labels, _locs=locs)
 
     @property
@@ -1426,14 +1445,21 @@ class DataSet(Generic):
 
         y = np.zeros((len(data), self.n_classes),
                      dtype=float if problem_type == "regression" else int)
-        mask = np.nonzero(mlbin.fit_transform(labels) > 0)
+        mask = mlbin.fit_transform(class_labels) > 0
 
         if problem_type == "classification":
             y[mask] = 1
         else:
-            # TODO not tested at all
-            for maski, yi in zip(mask, labels):
-                y[maski] = yi
+            labels = np.asarray(labels)
+            idxs = np.argwhere(mask)
+            rows, cols = idxs[:, 0], idxs[:, 1]
+
+            for i in np.unique(rows):
+                cols_i = cols[rows==i] 
+
+                for k, j in enumerate(cols_i):
+                    y[i, j] = labels[i, k]
+
 
         self._labels = y
         self._rng = np.random.RandomState(random_seed)
