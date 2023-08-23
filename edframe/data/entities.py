@@ -576,15 +576,18 @@ class Components(Backref):
         **kwargs,
     ) -> list[Any]:
         values = []
+
         for v in self.data:
             values.append(f(v, *args, **kwargs))
+
         return values
 
-    def sum(self, rule: str = "+"):
+    def agg(self, rule: str = "+"):
         if rule == "+":
             values = np.sum(self.values, axis=0)
         else:
             raise ValueError
+
         return self.backref.update(values=values, clear_components=True)
 
 
@@ -986,6 +989,18 @@ class PowerSample(Generic):
 
 class VI(PowerSample):
     __high__ = True
+
+    def reg_labels(self, target: str = "active"):
+        if self.components.count() == 0:
+            raise ValueError
+
+        if target == "active":
+            # FIXME resolve import issues
+            v = self.components.map(lambda x: rms(fryze(x)[0]))
+            labels = dict(zip(self.labels, v))
+            return self.update(labels=labels)
+        else:
+            raise ValueError
 
     def __init__(
         self,
@@ -1444,7 +1459,7 @@ class DataSet(Generic):
         elif isinstance(indexer, str):
             data = [x for x in self.data if x.label == indexer]
         elif isinstance(indexer, int | slice):
-            # FIXME any int-like object 
+            # FIXME any int-like object
             data = self.data[indexer]
         else:
             raise ValueError
