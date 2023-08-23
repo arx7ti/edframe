@@ -32,7 +32,7 @@ class Composer:
                 "Datasets of stand-alone appliances only are supported")
 
         for j in range(len(dataset.class_names)):
-            domain = np.argwhere(labels[:, j] == 1).ravel().tolist()
+            domain = np.argwhere(labels[:, j] == 1).ravel()
             self._domains.append(domain)
 
         self._rng_state = random_state
@@ -53,18 +53,18 @@ class Composer:
     def domains(self):
         return self._domains
 
-    def _save_sample(
-        self,
-        i: int,
-        y: np.ndarray,
-        x: np.ndarray,
-    ) -> None:
-        data = defaultdict()
-        data['y'] = y
-        data['x'] = x
-        file_name = '%d-%d' % (y.shape[0], i + 1)
-        file_path = os.path.join(self.dir_path, file_name)
-        np.save(file_path, data)
+    # def _save_sample(
+    #     self,
+    #     i: int,
+    #     y: np.ndarray,
+    #     x: np.ndarray,
+    # ) -> None:
+    #     data = defaultdict()
+    #     data['y'] = y
+    #     data['x'] = x
+    #     file_name = '%d-%d' % (y.shape[0], i + 1)
+    #     file_path = os.path.join(self.dir_path, file_name)
+    #     np.save(file_path, data)
 
     def sample(
         self,
@@ -114,7 +114,7 @@ class Composer:
         # Repetitions of each appliance
         R = self._rng.randint(n_reps_min,
                               n_reps_max + 1,
-                              size=(n_samples, self.dataset.n_classes))
+                              size=(len(Y), self.dataset.n_classes))
         # Distribution of samples per combination
         p = n_samples // len(Y)
         p = np.asarray([p] * len(Y))
@@ -129,7 +129,6 @@ class Composer:
             dj = [(self.domains[j], j) for j in y]
             n_max = reduce(
                 lambda x, y: x * y,
-                # TODO check if r[j] is correct sampling
                 [math.comb(len(djk) + r[j] - 1, r[j]) for djk, j in dj])
             Ii = set()
 
@@ -137,8 +136,8 @@ class Composer:
                 sample = []
 
                 for djk, j in dj:
-                    sample.extend(
-                        self._rng.choice(djk, size=r[j], replace=True))
+                    tmp = self._rng.randint(0, len(djk), size=r[j])
+                    sample.extend(djk[tmp])
 
                 sample = tuple(sorted(sample))
 
@@ -148,6 +147,7 @@ class Composer:
             I |= Ii
 
         loss = n_samples - len(I)
+        # print(loss)
 
         if loss > 0:
             # FIXME not correct
