@@ -1450,7 +1450,6 @@ class DataSet(Generic):
         if problem_type == "classification":
             y[mask] = 1
         else:
-            labels = np.asarray(labels)
             idxs = np.argwhere(mask)
             rows, cols = idxs[:, 0], idxs[:, 1]
 
@@ -1458,7 +1457,7 @@ class DataSet(Generic):
                 cols_i = cols[rows==i] 
 
                 for k, j in enumerate(cols_i):
-                    y[i, j] = labels[i, k]
+                    y[i, j] = labels[i][k]
 
 
         self._labels = y
@@ -1468,6 +1467,7 @@ class DataSet(Generic):
 
     def __getitem__(self, indexer):
         # TODO everywhere: if len == 1 then just item
+        # TODO boolean mask
         if abby.is_bearable(indexer, Iterable):
             assert len(indexer) > 0
             dtype = type(indexer[0])
@@ -1501,6 +1501,7 @@ class DataSet(Generic):
         class_name__in: Optional[list[str]] = None,
     ) -> DataSet:
         if class_name is not None:
+            # FIXME upd class names also
             return self[class_name]
 
         if class_name__in is not None:
