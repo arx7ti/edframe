@@ -1349,9 +1349,9 @@ class DataSet(Generic):
     # TODO for each subclass its own implementation
     __low__ = False
     __high__ = False
-    events = Events
+    # events = Events
     # TODO if single object called then keep features
-    features = Features
+    # features = Features
 
     # sample = PowerSample
 
@@ -1376,6 +1376,8 @@ class DataSet(Generic):
     def data(self, data):
         if isinstance(data, list):
             self._data = data
+            labels, class_names, n_components = self._get_labels(data)
+            self._labels, self._class_names, self._n_components = labels, class_names, n_components
         else:
             raise ValueError
 
@@ -1391,11 +1393,19 @@ class DataSet(Generic):
         # self._check_fs()
 
         self._data = data
+        self._labels, self._class_names, self._n_components = self._get_labels(
+            data)
+
+        self._rng = np.random.RandomState(random_seed)
+
+        self.__backref__()
+
+    def _get_labels(self, data):
 
         dtypes = set()
         class_labels = []
         labels = []
-        self._n_components = 0
+        n_components = 0
 
         for s in data:
             # TODO if no labels
@@ -1413,11 +1423,11 @@ class DataSet(Generic):
                 type(v.item()) if hasattr(v, "item") else type(v)
                 for v in _labels
             }
-            self._n_components = max(self._n_components, len(_labels))
+            n_components = max(n_components, len(_labels))
 
-        self._class_names = sorted(list(set(
+        class_names = sorted(list(set(
             it.chain(*class_labels))))  # Really stange behavior
-        cn_dtypes = {type(cn) for cn in self._class_names}
+        cn_dtypes = {type(cn) for cn in class_names}
 
         # TODO move labels type check inside sample's class
         if len(dtypes) != 1:
@@ -1428,10 +1438,10 @@ class DataSet(Generic):
 
         cn_dtype = cn_dtypes.pop()
 
-        if cn_dtype is not str:
+        if cn_dtype is not str:  # TODO any kind of str
             raise TypeError("Class names must be str")
 
-        mlbin = MultiLabelBinarizer(classes=self._class_names)
+        mlbin = MultiLabelBinarizer(classes=class_names)
         dtype = dtypes.pop()
 
         if dtype is str:
@@ -1443,7 +1453,8 @@ class DataSet(Generic):
         else:
             raise ValueError
 
-        y = np.zeros((len(data), self.n_classes),
+        n_classes = len(class_names)
+        y = np.zeros((len(data), n_classes),
                      dtype=float if problem_type == "regression" else int)
         mask = mlbin.fit_transform(class_labels) > 0
 
@@ -1454,16 +1465,12 @@ class DataSet(Generic):
             rows, cols = idxs[:, 0], idxs[:, 1]
 
             for i in np.unique(rows):
-                cols_i = cols[rows==i] 
+                cols_i = cols[rows == i]
 
                 for k, j in enumerate(cols_i):
                     y[i, j] = labels[i][k]
 
-
-        self._labels = y
-        self._rng = np.random.RandomState(random_seed)
-
-        self.__backref__()
+        return y, class_names, n_components
 
     def __getitem__(self, indexer):
         # TODO everywhere: if len == 1 then just item
@@ -1491,7 +1498,7 @@ class DataSet(Generic):
             raise ValueError
 
         if isinstance(data, Iterable):
-            return self.update(data=data)
+            return self.update(_data=data)
 
         return data
 
@@ -1509,6 +1516,22 @@ class DataSet(Generic):
 
     def __len__(self):
         return len(self.data)
+
+    def combine(self, class_names: list[str], class_name: str = None):
+        assert len(class_names) > 0
+        class_names = list(map(str, class_names))
+
+        if class_name is None:
+            class_name = class_names[0]
+
+        # data = self.get(class_name__in=class_names).data
+        # TODO improve
+        data = list(
+            map(
+                lambda x: x.update(_labels=[class_name])
+                if x.label in class_names else x, self.data))
+
+        return self.update(data=data)
 
     def create(self, *args: Any, **kwargs: Any) -> PowerSample:
         sample_cls = self.data[0].__class__
@@ -1608,11 +1631,6 @@ class DataSet(Generic):
                 samples.append(subsample)
 
         return self.new(samples)
-
-    # TODO
-    # def map(self, fs):
-    #     data = []
-    #     return data
 
 
 class HIDataSet(DataSet):
