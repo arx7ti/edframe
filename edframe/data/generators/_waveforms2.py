@@ -3,11 +3,14 @@ from __future__ import annotations
 # External packages
 import math
 import numpy as np
+import pandas as pd
 from scipy.stats import lognorm
 from scipy.signal import impulse
+from datetime import datetime, timedelta
 
 # Internal packages
-from ...utils.random import tnormal
+from ...utils.random import tnormal, gaussian_mixture
+from ...utils.common import nested_dict, to_regular_dict
 
 
 def _distribute_samples(n_samples, n_classes, n_clusters_per_class):
@@ -262,17 +265,17 @@ def make_rms_signature(
         on = 0
 
     for k in range(n_cycles):
-        cycle = make_cycle(dt=dt[k],
-                           fs=fs,
-                           level=level[k],
-                           overshoot=overshoot[k],
-                           decay=decay[k],
-                           freq=freq[k],
-                           damping=damping[k],
-                           beta_noise=beta[k],
-                           a=a[k],
-                           b=b[k],
-                           std=noise_std)
+        cycle = make_rms_cycle(dt=dt[k],
+                               fs=fs,
+                               level=level[k],
+                               overshoot=overshoot[k],
+                               decay=decay[k],
+                               freq=freq[k],
+                               damping=damping[k],
+                               beta_noise=beta[k],
+                               a=a[k],
+                               b=b[k],
+                               std=noise_std)
 
         if return_events:
             off = on + len(cycle)
@@ -338,21 +341,21 @@ def make_rms_signatures(
         n_signatures = n_dist[m]
 
         for _ in range(n_signatures):
-            signature = make_signature(n_cycles=n_cycles[m],
-                                       dt=dt[m],
-                                       pad_width=pad_width[m],
-                                       fs=fs,
-                                       level=level[m],
-                                       overshoot=overshoot[m],
-                                       decay=decay[m],
-                                       freq=freq[m],
-                                       damping=damping[m],
-                                       p_beta=p_beta[m],
-                                       a=a[m],
-                                       b=b[m],
-                                       noise_std=noise_std,
-                                       std=std,
-                                       return_events=return_events)
+            signature = make_rms_signature(n_cycles=n_cycles[m],
+                                           dt=dt[m],
+                                           pad_width=pad_width[m],
+                                           fs=fs,
+                                           level=level[m],
+                                           overshoot=overshoot[m],
+                                           decay=decay[m],
+                                           freq=freq[m],
+                                           damping=damping[m],
+                                           p_beta=p_beta[m],
+                                           a=a[m],
+                                           b=b[m],
+                                           noise_std=noise_std,
+                                           std=std,
+                                           return_events=return_events)
 
             if return_events:
                 signature, evs = signature
@@ -366,3 +369,145 @@ def make_rms_signatures(
         return signatures, labels, events
 
     return signatures, labels
+
+
+def make_households(
+        n_households=3,
+        n_days=7,
+        n_appliances=2,
+        n_modes_range=(1, 5),
+        n_activations_range=(1, 10),
+        start_date=None,
+        datetimefmt=False,
+        peak_time=[7, 19],
+        peak_weights=[0.3, 0.7],
+        fs=1,
+        n_cycles_range=(1, 10),
+        identical_signatures=0.7,
+        dt_cycle_range=(1, 1800),
+        pad_width_range=(0, 120),
+        level_range=(10, 1500),
+        decay_range=(0.5, 10),
+        a_range=(0.01, 0.1),
+        b_range=(0.01, 0.1),
+        overshoot_range=(1, 10),
+        freq_range=(0.5, 3),
+        damping_range=(-0.1, 0.1),
+        p_beta_range=(0.1, 0.6),
+        std=0.5,
+        noise_std=0.01,
+        **kwargs,
+):
+    assert identical_signatures >= 0 and identical_signatures <= 1
+
+    tday = np.linspace(0, 24, round(86400 * fs))
+    n_activations = np.random.randint(*n_activations_range, n_appliances)
+    n_activations = np.random.poisson(n_activations,
+                                      (n_households * n_days, n_appliances))
+    n_modes_per_appliance = np.random.randint(*n_modes_range, n_appliances)
+    activations = gaussian_mixture(loc=peak_time,
+                                   scale=[std] * len(peak_time),
+                                   weights=peak_weights,
+                                   size=n_activations.sum(),
+                                   a=tday.min(),
+                                   b=tday.max())
+    activations = np.abs(activations[None] - tday[:, None]).argmin(0)
+
+    a = 0
+    activations_tmp = []
+    for app in range(n_appliances):
+        b = n_activations[:, app].sum()
+        activations_tmp.append(activations[a:a + b])
+        a = b
+
+    activations = activations_tmp
+    n_signatures = n_activations.sum(0)
+    assert all(n_signatures == list(map(len, activations)))
+
+    n_unique = np.round((1 - identical_signatures) * n_signatures).astype(int)
+    n0 = (n_unique == 0) & (n_signatures > 0)
+    n_unique[n0] = 1
+    n_identical = n_signatures - n_unique
+    assert np.all(n_identical + n_unique == n_signatures)
+    signatures, labels, events = make_rms_signatures(
+        n_signatures=n_unique,
+        n_appliances=n_appliances,
+        n_modes_per_appliance=n_modes_per_appliance,
+        return_events=True)
+    app_cols = [f'appliance_{app}' for app in range(1, n_appliances + 1)]
+    app_cols_on = [f'{app_col}_on' for app_col in app_cols]
+    X = pd.DataFrame(columns=[
+        'timestamp',
+        'total',
+        *app_cols,
+        *app_cols_on,
+    ])
+    meta_data = nested_dict()
+
+    if start_date is None:
+        start_date = datetime.now()
+
+    end_date = start_date + timedelta(seconds=n_days * 86400)
+    timestamp = pd.date_range(start_date, end_date, periods=n_days * len(tday))
+
+    if not datetimefmt:
+        timestamp = list(map(lambda t: int(t.timestamp()), timestamp))
+
+    X.loc[:, 'timestamp'] = timestamp
+    X.loc[:, app_cols + app_cols_on] = 0
+    X.loc[:, app_cols_on] = X.loc[:, app_cols_on].astype(int)
+    X = X.set_index('timestamp')
+
+    for app in range(n_appliances):
+        app_signatures = [s for s, l in zip(signatures, labels) if l == app]
+
+        if len(app_signatures) == 0:
+            continue
+
+        app_events = [e for e, l in zip(events, labels) if l == app]
+        idn = np.random.randint(0, len(app_signatures), n_identical[app])
+        app_signatures.extend([app_signatures[i] for i in idn])
+        app_events.extend([app_events[i] for i in idn])
+        n_signatures_per_house, _ = _distribute_samples(
+            n_signatures[app], n_households, 1)
+        app_activations = activations[app]
+
+        a = 0
+        for house in range(n_households):
+            b = a + n_signatures_per_house[house]
+            house_signatures = app_signatures[a:b]
+            house_events = app_events[a:b]
+            house_activations = app_activations[a:b]
+            days = np.repeat(np.arange(n_days), len(house_activations))
+            off_max = n_days * len(tday)
+            meta_data[f'House_{house}'][f'appliance_{app+1}'][
+                'activations'] = []
+            meta_data[f'House_{house}'][f'appliance_{app+1}']['events'] = []
+
+            for sgn, evs, act, day in zip(house_signatures, house_events,
+                                          app_activations, days):
+                on = day * len(tday) + act
+                off = on + len(sgn)
+
+                if off > off_max:
+                    off = off_max
+                    sgn = sgn[:off_max - on]
+
+                evs = np.asarray(evs) + on
+                mask = (evs >= off_max).any(1)
+                evs = np.delete(evs, mask.nonzero()[0], axis=0).tolist()
+                evs = list(
+                    map(lambda e: (timestamp[e[0]], timestamp[e[1] - 1]), evs))
+
+                on, off = timestamp[on], timestamp[off - 1]
+                X.loc[on:off, f'appliance_{app+1}'] = sgn
+                X.loc[on:off, f'appliance_{app+1}_on'] = 1
+                meta_data[f'House_{house}'][f'appliance_{app+1}'][
+                    'activations'].append((on, off))
+                meta_data[f'House_{house}'][f'appliance_{app+1}'][
+                    'events'].extend(evs)
+
+    X.loc[:, 'total'] = X.loc[:, app_cols].sum(1)
+    meta_data = to_regular_dict(meta_data)
+
+    return X, meta_data
