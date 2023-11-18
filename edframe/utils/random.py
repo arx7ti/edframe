@@ -4,7 +4,8 @@ from typing import Optional
 
 import math
 import numpy as np
-from scipy.stats import truncnorm 
+from scipy.stats import truncnorm
+
 
 def randmask_2d(
     n: int,
@@ -55,3 +56,27 @@ def tnormal(a=None, b=None, loc=0, scale=1, size=0):
     tn = truncnorm((a - loc) / scale, (b - loc) / scale, loc=loc, scale=scale)
 
     return tn.rvs(size=size)
+
+
+def gaussian_mixture(
+    a=None,
+    b=None,
+    loc=[0, 10],
+    scale=[1, 1],
+    weights=[0.5, 0.5],
+    size=1,
+):
+    assert len(loc) == len(scale) == len(weights)
+
+    samples = np.zeros(size)
+    components = np.random.choice(len(loc), size=size, p=weights)
+
+    for i in range(len(loc)):
+        mask = components == i
+        samples[mask] = tnormal(a=a,
+                                b=b,
+                                loc=loc[i],
+                                scale=scale[i],
+                                size=mask.sum())
+
+    return samples
