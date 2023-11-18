@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 # External packages
+import math
 import numpy as np
-from scipy.stats import lognorm
+from scipy.stats import lognorm 
+
+from ...utils.random import tnormal
 
 
 def make_periods(
@@ -76,6 +79,66 @@ def make_periods(
 
         # Create labels
         yk = np.ones(n, dtype=int) * k // n_clusters_per_class
+
+        X = np.concatenate((X, Xk))
+        y = np.concatenate((y, yk))
+
+    return X, y
+
+
+def make_oscillations(
+        n_samples=100,
+        diversity=1,
+        n_classes=1,
+        n_clusters_per_class=1,
+        cluster_std=1,
+        spectral_std=1,
+        psr_range=(1, 5),
+        decay_range=(5, 50),
+        dt=1.0,
+        fs=5000,
+        f0=50.,
+        **periods_kwargs,
+):
+    n_reps = math.ceil(dt * f0)
+    period_size = round(fs / f0)
+    time = np.linspace(0, dt, round(dt * f0 * period_size))
+
+    if diversity == 0:
+        divs = np.ones(n_classes) / n_classes
+    else:
+        divs = np.random.poisson(diversity, n_classes)
+        divs = np.clip(divs, a_min=1, a_max=None)
+
+    psr_centers = np.random.uniform(*psr_range, n_classes)
+    decay_centers = np.random.uniform(*decay_range, n_classes)
+
+    X = np.empty((0, len(time)), dtype=float)
+    y = np.empty(0, dtype=int)
+
+    for k in range(n_classes):
+        Xk, _ = make_periods(
+            n_samples=n_samples * divs[k],  # FIXME n_spc
+            n_classes=1,
+            n_clusters_per_class=n_clusters_per_class,
+            cluster_std=spectral_std,
+            output_size=period_size,
+            **periods_kwargs)
+        Xk = Xk.reshape(n_samples, divs[k], -1)
+        Xk = np.repeat(Xk[:, None], n_reps, axis=1)
+        Xk = Xk.reshape(n_samples, -1)
+        Xk = Xk[:, :len(time)]
+
+        decay = cluster_std * np.abs(np.random.randn(n_samples, 1))
+        decay += decay_centers[k]
+        psr = tnormal(a=-1,
+                      b=None,
+                      loc=psr_centers[k],
+                      scale=cluster_std,
+                      size=(n_samples, 1))
+
+        Xk *= 1 + (psr * np.exp(-decay * time))
+        yk = np.ones(n_samples) * k
 
         X = np.concatenate((X, Xk))
         y = np.concatenate((y, yk))

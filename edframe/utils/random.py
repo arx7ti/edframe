@@ -4,7 +4,7 @@ from typing import Optional
 
 import math
 import numpy as np
-
+from scipy.stats import truncnorm 
 
 def randmask_2d(
     n: int,
@@ -43,3 +43,15 @@ def randmask_2d(
             repeats = np.s_[:, repeats]
         mask = np.concatenate((mask, mask[repeats]), axis=axis)
     return mask
+
+
+def tnormal(a=None, b=None, loc=0, scale=1, size=0):
+    if a is None:
+        a = np.NINF
+
+    if b is None:
+        b = np.Inf
+
+    tn = truncnorm((a - loc) / scale, (b - loc) / scale, loc=loc, scale=scale)
+
+    return tn.rvs(size=size)
