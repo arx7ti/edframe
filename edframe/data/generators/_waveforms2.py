@@ -3,9 +3,38 @@ from __future__ import annotations
 # External packages
 import math
 import numpy as np
-from scipy.stats import lognorm 
+from scipy.stats import lognorm
+from scipy.signal import impulse
 
+# Internal packages
 from ...utils.random import tnormal
+
+
+def _distribute_samples(n_samples, n_classes, n_clusters_per_class):
+    if not isinstance(n_clusters_per_class, list | np.ndarray):
+        n_clusters_per_class = np.asarray([n_clusters_per_class] * n_classes)
+
+    n_clusters_per_class = np.asarray(n_clusters_per_class)
+    assert n_classes == len(n_clusters_per_class)
+    assert np.all(n_clusters_per_class > 0)
+    n_clusters = n_clusters_per_class.sum()
+
+    if not isinstance(n_samples, list | np.ndarray):
+        n_spc = n_samples // n_clusters
+        n_spc = n_spc * np.ones(n_clusters, dtype=int)
+        n_spc[np.arange(n_samples - n_spc.sum()) % n_clusters] += 1
+        assert n_spc.sum() == n_samples
+    else:
+        n_samples = np.asarray(n_samples)
+        n_spc = n_samples // n_clusters_per_class
+        n_spc = np.repeat(n_spc, n_clusters_per_class)
+        n_spc[np.arange(n_samples.sum() - n_spc.sum()) % n_clusters] += 1
+        assert len(n_spc) == n_clusters
+
+    # Class indices with regards to the clusters
+    class_for_cluster = np.repeat(np.arange(n_classes), n_clusters_per_class)
+
+    return n_spc, class_for_cluster
 
 
 def make_periods(
@@ -144,3 +173,36 @@ def make_oscillations(
         y = np.concatenate((y, yk))
 
     return X, y
+
+
+def make_rms_cycle(
+    dt=300,
+    fs=1,
+    level=1000,
+    overshoot=2,
+    decay=1,
+    damping=1,
+    freq=1,
+    beta_noise=False,
+    a=0.1,
+    b=0.01,
+    std=1e-2,
+    **kwargs,
+):
+    n = np.round(fs * dt).astype(int)
+    t_exp = np.linspace(0, dt, n)
+
+    cycle = level * np.ones(n)
+    cycle *= 1 + (overshoot - 1) * np.exp(-decay * t_exp)
+    cycle *= 1 + impulse([(damping), (freq, 1, 1)], N=n)[1]
+    cycle *= 1 + std * np.random.randn(n)
+
+    if beta_noise:
+        eps = kwargs.get('eps', 1e-12)
+        a = a + eps if a == 0 else a
+        b = b + eps if b == 0 else b
+        cycle *= np.random.beta(a, b, n)
+
+    cycle = np.clip(cycle, a_min=0, a_max=None)
+
+    return cycle
