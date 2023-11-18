@@ -206,3 +206,163 @@ def make_rms_cycle(
     cycle = np.clip(cycle, a_min=0, a_max=None)
 
     return cycle
+
+
+def pad_cycle(cycle, pad_width, std=0.01):
+    padding = np.ones(pad_width)
+    padding *= 1 + std * np.random.randn(pad_width)
+    padding = np.clip(padding, a_min=0, a_max=None)
+
+    return np.concatenate((cycle, padding))
+
+
+def make_rms_signature(
+    n_cycles=5,
+    dt=60,
+    pad_width=15,
+    fs=1,
+    level=1000,
+    overshoot=1.,
+    decay=1.,
+    freq=2,
+    damping=0.1,
+    p_beta=0.5,
+    a=0.1,
+    b=0.01,
+    std=0.5,
+    noise_std=1e-2,
+    return_events=False,
+):
+    # Multiplicative scale
+    dt = tnormal(1 / fs, loc=dt, scale=dt * std, size=n_cycles)
+    pad_width = tnormal(0, loc=pad_width, scale=pad_width * std, size=n_cycles)
+    pad_width = np.round(fs * pad_width).astype(int)
+    level = tnormal(a=0, loc=level, scale=level * std, size=n_cycles)
+    decay = tnormal(a=0, loc=decay, scale=decay * std, size=n_cycles)
+    a = tnormal(0, loc=a, scale=a * std, size=n_cycles)
+    b = tnormal(0, loc=b, scale=b * std, size=n_cycles)
+
+    # Standard scale
+    overshoot = tnormal(a=0, loc=overshoot, scale=std, size=n_cycles)
+    freq = tnormal(a=0., loc=freq, scale=std, size=n_cycles)
+    damping = damping + std * np.random.randn(n_cycles)
+
+    # Beta Noise Conditioning
+    beta = np.random.choice([1, 0], p=[p_beta, 1 - p_beta], size=n_cycles)
+    beta *= np.where(level <= level.mean(), 1, 0)
+    beta *= np.where(dt > dt.mean(), 1, 0)
+
+    # Fluctuation Conditioning
+    damping *= 1 - beta
+
+    cycles = []
+
+    if return_events:
+        events = []
+        on = 0
+
+    for k in range(n_cycles):
+        cycle = make_cycle(dt=dt[k],
+                           fs=fs,
+                           level=level[k],
+                           overshoot=overshoot[k],
+                           decay=decay[k],
+                           freq=freq[k],
+                           damping=damping[k],
+                           beta_noise=beta[k],
+                           a=a[k],
+                           b=b[k],
+                           std=noise_std)
+
+        if return_events:
+            off = on + len(cycle)
+            event = on, off
+            events.append(event)
+            on = off + pad_width[k]
+
+        if k < n_cycles - 1:
+            cycle = pad_cycle(cycle, pad_width[k], std=noise_std)
+
+        cycles.append(cycle)
+
+    if return_events:
+        return np.concatenate(cycles), events
+
+    return np.concatenate(cycles)
+
+
+def make_rms_signatures(
+        n_signatures=100,
+        n_appliances=2,
+        n_modes_per_appliance=1,
+        fs=1,
+        n_cycles_range=(1, 10),
+        dt_range=(1, 1800),
+        pad_width_range=(0, 120),
+        level_range=(10, 1500),
+        decay_range=(0.5, 10),
+        a_range=(0.01, 0.1),
+        b_range=(0.01, 0.1),
+        overshoot_range=(1, 10),
+        freq_range=(0.5, 3),
+        damping_range=(-0.1, 0.1),
+        p_beta_range=(0.1, 0.6),
+        std=0.5,
+        noise_std=0.01,
+        return_events=False,
+):
+    n_dist, app4mode = _distribute_samples(n_signatures, n_appliances,
+                                           n_modes_per_appliance)
+    n_modes = len(n_dist)
+
+    n_cycles = np.random.randint(*n_cycles_range, n_modes)
+    dt = np.random.uniform(*dt_range, n_modes)
+    pad_width = np.random.uniform(*pad_width_range, n_modes)
+    level = np.random.uniform(*level_range, n_modes)
+    decay = np.random.uniform(*decay_range, n_modes)
+    a = np.random.uniform(*a_range, n_modes)
+    b = np.random.uniform(*b_range, n_modes)
+    overshoot = np.random.uniform(*overshoot_range, n_modes)
+    freq = np.random.uniform(*freq_range, n_modes)
+    damping = np.random.uniform(*damping_range, n_modes)
+    p_beta = np.random.uniform(*p_beta_range, n_modes)
+
+    signatures = []
+    labels = []
+
+    if return_events:
+        events = []
+
+    for m in range(n_modes):
+        app = app4mode[m]
+        n_signatures = n_dist[m]
+
+        for _ in range(n_signatures):
+            signature = make_signature(n_cycles=n_cycles[m],
+                                       dt=dt[m],
+                                       pad_width=pad_width[m],
+                                       fs=fs,
+                                       level=level[m],
+                                       overshoot=overshoot[m],
+                                       decay=decay[m],
+                                       freq=freq[m],
+                                       damping=damping[m],
+                                       p_beta=p_beta[m],
+                                       a=a[m],
+                                       b=b[m],
+                                       noise_std=noise_std,
+                                       std=std,
+                                       return_events=return_events)
+
+            if return_events:
+                signature, evs = signature
+                events.append(evs)
+
+            signatures.append(signature)
+
+        labels.extend([app] * n_signatures)
+
+    if return_events:
+        return signatures, labels, events
+
+    return signatures, labels
