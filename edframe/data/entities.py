@@ -1632,6 +1632,12 @@ class DataSet(Generic):
 
         return self.new(samples)
 
+    @property
+    def classes(self):
+        for class_name in self.class_names:
+            subset = self.get(class_name=class_name)
+            yield subset
+
 
 class HIDataSet(DataSet):
     __high__ = True

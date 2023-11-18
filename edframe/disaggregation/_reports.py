@@ -1,6 +1,7 @@
 from __future__ import annotations
 from typing import Iterable, Callable
 
+import torch
 import inspect
 import numpy as np
 import pandas as pd
@@ -9,6 +10,7 @@ from .metrics import Metric
 
 
 class Report:
+
     def __init__(self, metrics: Iterable['Metric' | 'Callable']) -> None:
         self._metrics = metrics
         # self._columns = ["Model"]
@@ -46,7 +48,16 @@ class Report:
             elif hasattr(model, "transform"):
                 y_pred = model.transform(X)
             elif callable(model):
-                y_pred = model(X)
+                if isinstance(model, torch.nn.Module):
+                    model.eval()
+                    with torch.no_grad():
+                        # NOTE temporal
+                        y_pred = torch.nn.functional.sigmoid(
+                            model(X)).cpu().numpy()
+                        y_pred = np.where(y_pred > 0.5, 1, 0)
+                        y = y.cpu().numpy()
+                else:
+                    y_pred = model(X)
             else:
                 raise ValueError("Model should be callable or have one of the methods "\
                                     "`predict` or `transform`")
