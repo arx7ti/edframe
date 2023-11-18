@@ -120,6 +120,7 @@ def make_periods(
 
 def make_oscillations(
         n_samples=100,
+        p_diversity=0.5,
         diversity=1,
         n_classes=1,
         n_clusters_per_class=1,
@@ -141,6 +142,10 @@ def make_oscillations(
     else:
         divs = np.random.poisson(diversity, n_classes)
         divs = np.clip(divs, a_min=1, a_max=None)
+        divmask = np.random.choice([True, False],
+                                   size=len(divs),
+                                   p=(p_diversity, 1-p_diversity))
+        divs[~divmask] = 1
 
     psr_centers = np.random.uniform(*psr_range, n_classes)
     decay_centers = np.random.uniform(*decay_range, n_classes)
