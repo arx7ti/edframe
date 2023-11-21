@@ -152,6 +152,15 @@ class VI(H):
                         is_aligned=self.is_aligned(),
                         dims=self._dims)
 
+    def unitscale(self):
+        v = self.v / np.abs(self.v).max()
+        i = self.i / np.abs(self.i).max()
+        return self.new(v,
+                        i,
+                        self.fs,
+                        is_aligned=self.is_aligned(),
+                        dims=self._dims)
+
 
 class P(L):
 
