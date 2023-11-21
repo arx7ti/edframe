@@ -5,6 +5,8 @@ from numba import njit
 from typing import Optional
 from scipy.signal import butter, filtfilt
 
+from .exceptions import NotEnoughPeriods
+
 
 class FITPSNotCalledError(Exception):
     pass
@@ -36,14 +38,12 @@ class FITPS:
         f0=None,
     ) -> tuple[np.ndarray, ...]:
 
-        vf = v
-        v0 = self._compute_roots(vf)
+        v0 = self._compute_roots(v)
 
         if len(v0) < 2:
-            raise ValueError
+            raise NotEnoughPeriods
 
-        dv = self._compute_shifts(vf, v0)
-        del vf
+        dv = self._compute_shifts(v, v0)
 
         if f0 is not None and fs is not None:
             ns = round(fs / f0)

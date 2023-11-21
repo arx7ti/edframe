@@ -1,0 +1,2 @@
+class NotEnoughPeriods(Exception):
+    pass
