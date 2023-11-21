@@ -8,7 +8,7 @@ from beartype.typing import Iterable
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import MultiLabelBinarizer
 from typing import Optional, Callable, Union, Any, Iterable
-from edframe.signals import F, pad, roll, extrapolate, replicate, enhance, downsample, crop
+from edframe.signals import F, pad, roll, extrapolate, replicate, upsample, downsample, crop
 
 # import torch
 import random
@@ -966,11 +966,11 @@ class PowerSample(Generic):
     def roll(self, n: int) -> PowerSample:
         raise NotImplementedError
 
-    def enhance(self, fs: int, kind: str = "linear") -> PowerSample:
+    def upsample(self, fs: int, kind: str = "linear") -> PowerSample:
         if fs < self.fs:
             raise ValueError
 
-        data = enhance(self.data, self.fs, fs, kind=kind)
+        data = upsample(self.data, self.fs, fs, kind=kind)
 
         return self.update(data=data, fs=fs)
 

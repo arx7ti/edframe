@@ -16,7 +16,7 @@ def identity(x: np.ndarray):
 def downsample(x: np.ndarray, fs0: int, fs: int, axis: int = -1) -> np.ndarray:
     n = x.shape[-1]
     n_new = round(n / fs0 * fs)
-    assert n_new < n 
+    assert n_new < n
 
     if axis < 0:
         axis = len(x.shape) + axis
@@ -29,7 +29,7 @@ def downsample(x: np.ndarray, fs0: int, fs: int, axis: int = -1) -> np.ndarray:
     return x
 
 
-def enhance(
+def upsample(
     x: np.ndarray,
     fs0: int,
     fs: int,
@@ -38,14 +38,14 @@ def enhance(
 ) -> np.ndarray:
     n = x.shape[-1]
     n_new = round(n / fs0 * fs)
-    assert n_new > n 
+    assert n_new > n
 
     t0 = np.linspace(0, 1, n, dtype=x.dtype)
     t1 = np.linspace(0, 1, n_new, dtype=x.dtype)
     mean = x.mean(keepdims=True)
     x = x - mean
-    enhancer = interp1d(t0, x, kind=kind, axis=axis)
-    x = enhancer(t1)
+    upsampler = interp1d(t0, x, kind=kind, axis=axis)
+    x = upsampler(t1)
     x += mean
 
     return x
@@ -150,6 +150,7 @@ def extrapolate(x: np.ndarray, n: int, lags: int) -> np.ndarray:
 
 
 class F:
+
     def __init__(self, fn: Callable, map_out_args, **map_in_args) -> None:
 
         if len(map_out_args) == 0:
