@@ -55,6 +55,12 @@ class VI(H):
         self._dims = kwargs.get('dims', None)
         super().__init__(data, fs)
 
+    def __add__(self, vi):
+        return self.add(vi)
+
+    def __radd__(self, vi):
+        return self.add(vi)
+
     def is_aligned(self):
         return self._is_aligned
 
@@ -128,6 +134,18 @@ class VI(H):
         else:
             i[:n] = 0
 
+        return self.new(v,
+                        i,
+                        self.fs,
+                        is_aligned=self.is_aligned(),
+                        dims=self._dims)
+
+    def add(self, vi):
+        if not (self.is_aligned() and vi.is_aligned()):
+            raise ValueError
+
+        v = np.mean((self.v, vi.v), axis=0)
+        i = self.i + vi.i
         return self.new(v,
                         i,
                         self.fs,
