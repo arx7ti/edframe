@@ -42,6 +42,34 @@ def _distribute_samples(n_samples, n_appliances, n_modes_per_appliance):
     return n_spc, class_for_cluster
 
 
+def make_periods_from(X, n_samples=100, reg=1e-15):
+    output_size = X.shape[1]
+    X = X / np.abs(X).max(1, keepdims=True)
+    Z = np.fft.rfft(X, axis=-1)
+
+    # Sample statistics
+    m = np.mean(Z, axis=0, keepdims=True)
+    S = np.cov(Z, rowvar=False)
+    S += reg * np.eye(len(S))
+    L = np.linalg.cholesky(S)
+    a = np.abs(X).max(1)
+    ma = a.mean()
+    sa = a.std()
+
+    # Random variables
+    real, imag = np.random.randn(2, n_samples, len(L))
+    Zn = real + 1j * imag
+
+    # Synthetic periods based on statistics
+    Zn = m + np.dot(Zn, L.T)
+    Xn = np.fft.irfft(Zn, output_size, axis=1)
+    Xn = Xn / np.abs(Xn).max(1, keepdims=True)
+    an = ma + sa * np.abs(np.random.randn(n_samples, 1))
+    Xn *= an
+
+    return Xn
+
+
 def make_periods(
         n_samples=100,
         n_appliances=2,
