@@ -6,8 +6,8 @@ import numpy as np
 import pandas as pd
 import itertools as it
 
-from ..signals import FITPS, downsample, upsample
 from ..signals.exceptions import NotEnoughPeriods
+from ..signals import FITPS, downsample, upsample, roll
 
 
 class Gen:
@@ -39,6 +39,9 @@ class H(Gen):
     def i(self):
         return self._data[1]
 
+    def __len__(self):
+        return self.data.shape[1]
+
 
 class L(Gen):
     pass
@@ -55,8 +58,8 @@ class VI(H):
     def is_aligned(self):
         return self._is_aligned
 
-    def align(self, **kwargs):
-        fitps = FITPS(**kwargs)
+    def align(self):
+        fitps = FITPS()
 
         try:
             v, i = fitps(self.v, self.i, fs=self.fs)
@@ -85,9 +88,9 @@ class VI(H):
                         is_aligned=self.is_aligned(),
                         dims=self._dims)
 
-    def cycle(self, mode='mean', **kwargs):
+    def cycle(self, mode='mean'):
         if not self.is_aligned():
-            self = self.align(**kwargs)
+            self = self.align()
 
         dims = self._dims
         data = self.data.reshape(2, *dims)
@@ -103,6 +106,33 @@ class VI(H):
         dims = 1, len(v)
 
         return self.new(v, i, self.fs, is_aligned=self.is_aligned(), dims=dims)
+
+    def roll(self, n, outer=False):
+        if n == 0:
+            return self.new(self.v, self.i, self.fs)
+
+        n = len(self) if abs(n) > len(self) else n
+
+        if outer and not self.is_aligned():
+            self = self.align()
+
+        if outer:
+            _, p = self._dims
+            v, i = roll(self.data, abs(n) // p * p)
+        else:
+            i = roll(self.i, n)
+            v = self.v
+
+        if n < 0:
+            i[n:] = 0
+        else:
+            i[:n] = 0
+
+        return self.new(v,
+                        i,
+                        self.fs,
+                        is_aligned=self.is_aligned(),
+                        dims=self._dims)
 
 
 class P(L):
