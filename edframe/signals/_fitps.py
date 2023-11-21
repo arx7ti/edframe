@@ -21,13 +21,13 @@ class FITPS:
     Frequency Invariant Transformation of Periodic Signals.
     """
 
-    def __init__(
-        self,
-        n: int = 4,
-        cf: float = 0.01,
-    ) -> None:
-        self._n = n
-        self._cf = cf
+    # def __init__(
+    #     self,
+    #     n: int = 4,
+    #     cf: float = 0.01,
+    # ) -> None:
+    #     self._n = n
+    #     self._cf = cf
 
     def __call__(
         self,
@@ -107,10 +107,10 @@ class FITPS:
 
         return plocs
 
-    def _filter_v(self, v: np.ndarray) -> np.ndarray:
-        f1, f2 = butter(self._n, self._cf)
-        v = filtfilt(f1, f2, v).astype(v.dtype)
-        return v
+    # def _filter_v(self, v: np.ndarray) -> np.ndarray:
+    #     f1, f2 = butter(self._n, self._cf)
+    #     v = filtfilt(f1, f2, v).astype(v.dtype)
+    #     return v
 
     @staticmethod
     @njit
