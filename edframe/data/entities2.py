@@ -8,6 +8,7 @@ import itertools as it
 
 from ..signals.exceptions import NotEnoughPeriods
 from ..signals import FITPS, downsample, upsample, roll
+from ..utils.common import nested_dict
 
 
 class Gen:
@@ -161,6 +162,37 @@ class VI(Gen):
                         self.fs,
                         is_aligned=self.is_aligned(),
                         dims=self._dims)
+
+    def features(self, features, format='list', **kwargs):
+        data = []
+        f_kwargs = nested_dict()
+
+        for k, v in kwargs.items():
+            ks = k.split('__')
+            if len(ks) > 1 & len(ks[0]) > 0:
+                f_kwargs[ks[0]].update({''.join(ks[1:]): v})
+
+        for feature in features:
+            if isinstance(feature, str):
+                # TODO validate for existance
+                value = getattr(self, feature)(**f_kwargs[feature])
+            elif isinstance(feature, callable):
+                value = feature(**f_kwargs[feature])
+            else:
+                raise ValueError
+
+            data.append(value)
+
+        if format == 'numpy':
+            data = np.asarray(data)
+        elif format == 'pandas':
+            data = pd.DataFrame([data], columns=f_kwargs.keys())
+        elif format == 'dict':
+            data = dict(zip(f_kwargs.keys(), data))
+        elif format != 'list':
+            raise ValueError
+
+        return data
 
     def todict(self):
         data = {'v': self.v, 'i': self.i}
