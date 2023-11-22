@@ -5,6 +5,8 @@ import random
 import numpy as np
 import pandas as pd
 import itertools as it
+from numbers import Number
+from inspect import isfunction
 
 from ..signals.exceptions import NotEnoughPeriods
 from ..signals import FITPS, downsample, upsample, roll
@@ -166,33 +168,54 @@ class VI(Gen):
     def features(self, features, format='list', **kwargs):
         data = []
         f_kwargs = nested_dict()
+        f_reps = {}
 
         for k, v in kwargs.items():
             ks = k.split('__')
             if len(ks) > 1 & len(ks[0]) > 0:
                 f_kwargs[ks[0]].update({''.join(ks[1:]): v})
 
+        # TODO validate for dublicated names 
         for feature in features:
             if isinstance(feature, str):
                 # TODO validate for existance
-                value = getattr(self, feature)(**f_kwargs[feature])
-            elif isinstance(feature, callable):
-                value = feature(**f_kwargs[feature])
+                feature_fn = getattr(self, feature)
+            elif hasattr(feature, '__class__'):
+                feature_fn = feature
+                feature = feature_fn.__class__.__name__
+            elif isfunction(feature):
+                feature_fn = feature
+                feature = feature_fn.__name__
             else:
                 raise ValueError
 
-            data.append(value)
+            value = feature_fn(**f_kwargs[feature])
+
+            if isinstance(value, Number):
+                data.append(value)
+            elif hasattr(value, '__len__'):
+                data.extend(value)
+                f_reps.update({feature: len(value)})
+            else:
+                raise ValueError
+
+        keys = lambda: list(
+            it.chain(*[[f'{k}_{i}' for i in range(1, n + 1)]
+                       for k, n in f_reps.items()]))
 
         if format == 'numpy':
             data = np.asarray(data)
         elif format == 'pandas':
-            data = pd.DataFrame([data], columns=f_kwargs.keys())
+            data = pd.DataFrame([data], columns=keys())
         elif format == 'dict':
-            data = dict(zip(f_kwargs.keys(), data))
+            data = dict(zip(keys(), data))
         elif format != 'list':
             raise ValueError
 
         return data
+
+    def f(self):
+        return 1
 
     def todict(self):
         data = {'v': self.v, 'i': self.i}
