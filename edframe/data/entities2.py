@@ -59,6 +59,40 @@ class VI(Gen):
     def __len__(self):
         return self.data.shape[1]
 
+    def __getitem__(self, indexer):
+        if isinstance(indexer, tuple):
+            assert len(indexer) == 2
+            indexer, _ = indexer
+
+            if not self.is_aligned():
+                raise ValueError
+
+            if isinstance(_, slice):
+                if not (_.start == _.stop == _.step == None):
+                    raise ValueError
+            elif _ != Ellipsis:
+                raise ValueError
+
+            data = self.data.reshape(2, *self._dims)
+            keep_aligned = True
+        elif not isinstance(indexer, slice):
+            raise ValueError
+        else:
+            data = self.data
+            keep_aligned = False
+
+        data = data[:, indexer]
+
+        if keep_aligned:
+            dims = data.shape[1:]
+            data = data.reshape(2, -1)
+        else:
+            dims = None
+
+        v, i = data
+
+        return self.new(v, i, self.fs, is_aligned=keep_aligned, dims=dims)
+
     def __add__(self, vi):
         return self.add(vi)
 
@@ -67,6 +101,9 @@ class VI(Gen):
 
     def is_aligned(self):
         return self._is_aligned
+
+    def is_empty(self):
+        return len(self) == 0
 
     def align(self):
         fitps = FITPS()
@@ -102,8 +139,7 @@ class VI(Gen):
         if not self.is_aligned():
             self = self.align()
 
-        dims = self._dims
-        data = self.data.reshape(2, *dims)
+        data = self.data.reshape(2, *self._dims)
 
         if mode == 'mean':
             data = np.mean(data, axis=1)
@@ -175,7 +211,7 @@ class VI(Gen):
             if len(ks) > 1 & len(ks[0]) > 0:
                 f_kwargs[ks[0]].update({''.join(ks[1:]): v})
 
-        # TODO validate for dublicated names 
+        # TODO validate for dublicated names
         for feature in features:
             if isinstance(feature, str):
                 # TODO validate for existance
@@ -213,9 +249,6 @@ class VI(Gen):
             raise ValueError
 
         return data
-
-    def f(self):
-        return 1
 
     def todict(self):
         data = {'v': self.v, 'i': self.i}
