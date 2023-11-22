@@ -27,9 +27,17 @@ class Gen:
     def new(cls, *args, **kwargs):
         return cls(*args, **kwargs)
 
-    def __init__(self, data, fs) -> None:
+    def __init__(self, data, fs, y=None, locs=None) -> None:
+        if isinstance(y, str):
+            y = [y]
+
+        if y is not None and locs is not None:
+            assert len(y) == len(locs)
+
         self._data = data
         self._fs = fs
+        self._y = y
+        self._locs = locs
 
 
 class L(Gen):
@@ -40,26 +48,57 @@ class VI(Gen):
 
     @property
     def v(self):
-        return self._data[0]
+        v = self.data[0]
+
+        if self.n_components > 1:
+            v = v.mean(0)
+
+        return v
 
     @property
     def i(self):
-        return self._data[1]
+        i = self.data[1]
+
+        if self.n_components > 1:
+            i = i.sum(0)
+
+        return i
 
     @property
     def s(self):
         return self.v * self.i
 
-    def __init__(self, v, i, fs, **kwargs) -> None:
+    @property
+    def labels(self):
+        return self._y
+
+    @property
+    def n_components(self):
+        if len(self.data.shape) == 3:
+            return self.data.shape[1]
+
+        return 1
+
+    @property
+    def components(self):
+        if self.n_components > 1:
+            return [self.data[:, i] for i in range(self.n_components)]
+
+        return []
+
+    def __init__(self, v, i, fs, y=None, locs=None, **kwargs) -> None:
+        assert v.shape == i.shape
+
         data = np.stack((v, i))
         self._is_aligned = kwargs.get('is_aligned', False)
         self._dims = kwargs.get('dims', None)
-        super().__init__(data, fs)
+        super().__init__(data, fs, y=y, locs=locs)
 
     def __len__(self):
         return self.data.shape[1]
 
     def __getitem__(self, indexer):
+        # FIXME if n_components > 1
         if isinstance(indexer, tuple):
             assert len(indexer) == 2
             indexer, _ = indexer
@@ -73,7 +112,8 @@ class VI(Gen):
             elif _ != Ellipsis:
                 raise ValueError
 
-            data = self.data.reshape(2, *self._dims)
+            dims = (-1, *self._dims) if self.n_components > 1 else self._dims
+            data = self.data.reshape(2, *dims)
             keep_aligned = True
         elif not isinstance(indexer, slice):
             raise ValueError
@@ -81,11 +121,15 @@ class VI(Gen):
             data = self.data
             keep_aligned = False
 
-        data = data[:, indexer]
+        if self.n_components > 1:
+            data = data[:, :, indexer]
+        else:
+            data = data[:, indexer]
 
         if keep_aligned:
-            dims = data.shape[1:]
-            data = data.reshape(2, -1)
+            dims = data.shape[-2:]
+            dims = (self.n_components, -1) if self.n_components > 1 else -1
+            data = data.reshape(2, *dims)
         else:
             dims = None
 
@@ -99,6 +143,29 @@ class VI(Gen):
     def __radd__(self, vi):
         return self.add(vi)
 
+    def add(self, vi):
+        if not (self.is_aligned() and vi.is_aligned()):
+            raise ValueError
+
+        if self.fs != vi.fs:
+            raise ValueError
+
+        data1, data2 = self.data, vi.data
+
+        if self.n_components == 1:
+            data1 = data1[:, None]
+
+        if vi.n_components == 1:
+            data2 = data2[:, None]
+
+        v, i = np.concatenate((data1, data2), axis=1)
+
+        return self.new(v,
+                        i,
+                        self.fs,
+                        is_aligned=self.is_aligned(),
+                        dims=self._dims)
+
     def is_aligned(self):
         return self._is_aligned
 
@@ -106,6 +173,7 @@ class VI(Gen):
         return len(self) == 0
 
     def align(self):
+        # FIXME if n_components > 1
         fitps = FITPS()
 
         try:
@@ -119,6 +187,7 @@ class VI(Gen):
         return self.new(v, i, self.fs, is_aligned=True, dims=dims)
 
     def resample(self, fs, **kwargs):
+        # FIXME if n_components > 1
         if fs > self.fs:
             v = upsample(self.v, self.fs, fs, **kwargs)
             i = upsample(self.i, self.fs, fs, **kwargs)
@@ -136,6 +205,7 @@ class VI(Gen):
                         dims=self._dims)
 
     def cycle(self, mode='mean'):
+        # FIXME if n_components > 1
         if not self.is_aligned():
             self = self.align()
 
@@ -154,6 +224,7 @@ class VI(Gen):
         return self.new(v, i, self.fs, is_aligned=self.is_aligned(), dims=dims)
 
     def roll(self, n, outer=False):
+        # FIXME if n_components > 1
         if n == 0:
             return self.new(self.v, self.i, self.fs)
 
@@ -180,19 +251,8 @@ class VI(Gen):
                         is_aligned=self.is_aligned(),
                         dims=self._dims)
 
-    def add(self, vi):
-        if not (self.is_aligned() and vi.is_aligned()):
-            raise ValueError
-
-        v = np.mean((self.v, vi.v), axis=0)
-        i = self.i + vi.i
-        return self.new(v,
-                        i,
-                        self.fs,
-                        is_aligned=self.is_aligned(),
-                        dims=self._dims)
-
     def unitscale(self):
+        # FIXME if n_components > 1
         v = self.v / np.abs(self.v).max()
         i = self.i / np.abs(self.i).max()
         return self.new(v,
@@ -202,6 +262,7 @@ class VI(Gen):
                         dims=self._dims)
 
     def features(self, features, format='list', **kwargs):
+        # FIXME if n_components > 1
         data = []
         f_kwargs = nested_dict()
         f_reps = {}
