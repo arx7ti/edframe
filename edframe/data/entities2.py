@@ -29,7 +29,11 @@ class Gen:
         self._fs = fs
 
 
-class H(Gen):
+class L(Gen):
+    pass
+
+
+class VI(Gen):
 
     @property
     def v(self):
@@ -39,21 +43,18 @@ class H(Gen):
     def i(self):
         return self._data[1]
 
-    def __len__(self):
-        return self.data.shape[1]
-
-
-class L(Gen):
-    pass
-
-
-class VI(H):
+    @property
+    def s(self):
+        return self.v * self.i
 
     def __init__(self, v, i, fs, **kwargs) -> None:
         data = np.stack((v, i))
         self._is_aligned = kwargs.get('is_aligned', False)
         self._dims = kwargs.get('dims', None)
         super().__init__(data, fs)
+
+    def __len__(self):
+        return self.data.shape[1]
 
     def __add__(self, vi):
         return self.add(vi)
@@ -160,6 +161,20 @@ class VI(H):
                         self.fs,
                         is_aligned=self.is_aligned(),
                         dims=self._dims)
+
+    def todict(self):
+        data = {'v': self.v, 'i': self.i}
+        return data
+
+    def todf(self):
+        df = pd.DataFrame(self.todict())
+        return df
+
+    def tolist(self):
+        return [self.v.tolist(), self.i.tolist()]
+
+    def toarray(self):
+        return self.data
 
 
 class P(L):
