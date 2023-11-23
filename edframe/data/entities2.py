@@ -69,6 +69,14 @@ class VI(Gen):
         return self.v * self.i
 
     @property
+    def __v(self):
+        return self.data[0]
+
+    @property
+    def __i(self):
+        return self.data[1]
+
+    @property
     def labels(self):
         return self._y
 
@@ -187,16 +195,15 @@ class VI(Gen):
         return self.new(v, i, self.fs, is_aligned=True, dims=dims)
 
     def resample(self, fs, **kwargs):
-        # FIXME if n_components > 1
         if fs > self.fs:
-            v = upsample(self.v, self.fs, fs, **kwargs)
-            i = upsample(self.i, self.fs, fs, **kwargs)
+            v = upsample(self.__v, self.fs, fs, **kwargs)
+            i = upsample(self.__i, self.fs, fs, **kwargs)
         elif fs < self.fs:
-            v = downsample(self.v, self.fs, fs)
-            i = downsample(self.i, self.fs, fs)
+            v = downsample(self.__v, self.fs, fs)
+            i = downsample(self.__i, self.fs, fs)
         else:
-            v = self.v
-            i = self.i
+            v = self.__v
+            i = self.__i
 
         return self.new(v,
                         i,
