@@ -8,6 +8,7 @@ import itertools as it
 from numbers import Number
 from inspect import isfunction
 
+from .decorators import feature
 from ..signals.exceptions import NotEnoughPeriods
 from ..signals import FITPS, downsample, upsample, roll
 from ..utils.common import nested_dict
@@ -94,6 +95,13 @@ class VI(Gen):
 
         return []
 
+    @feature
+    def phase_shift(self):
+        raise NotImplementedError
+
+    def components_required(self, required=True):
+        self._require_components = required
+
     def __init__(self, v, i, fs, y=None, locs=None, **kwargs) -> None:
         assert v.shape == i.shape
 
@@ -110,7 +118,6 @@ class VI(Gen):
         return dims
 
     def __getitem__(self, indexer):
-        # FIXME if n_components > 1
         if isinstance(indexer, tuple):
             assert len(indexer) == 2
             indexer, _ = indexer
@@ -184,7 +191,7 @@ class VI(Gen):
         return len(self) == 0
 
     def align(self):
-        # FIXME if n_components > 1
+        # NOTE multi-component instance will be transformed into single-component
         fitps = FITPS()
 
         try:
@@ -272,7 +279,6 @@ class VI(Gen):
                         dims=self._dims)
 
     def features(self, features, format='list', **kwargs):
-        # FIXME if n_components > 1
         data = []
         f_kwargs = nested_dict()
         f_reps = {}
@@ -285,8 +291,13 @@ class VI(Gen):
         # TODO validate for dublicated names
         for feature in features:
             if isinstance(feature, str):
-                # TODO validate for existance
-                feature_fn = getattr(self, feature)
+                try:
+                    feature_fn = getattr(self, feature)
+                except AttributeError:
+                    raise ValueError
+
+                if not getattr(feature_fn, 'is_feature', False):
+                    raise ValueError
             elif hasattr(feature, '__class__'):
                 feature_fn = feature
                 feature = feature_fn.__class__.__name__
