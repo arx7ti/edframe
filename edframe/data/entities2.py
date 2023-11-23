@@ -262,9 +262,9 @@ class VI(Gen):
                         dims=self._dims)
 
     def unitscale(self):
-        # FIXME if n_components > 1
-        v = self.v / np.abs(self.v).max()
-        i = self.i / np.abs(self.i).max()
+        v, i = self.data
+        i = i / np.abs(self.i).max()
+
         return self.new(v,
                         i,
                         self.fs,
