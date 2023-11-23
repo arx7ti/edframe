@@ -30,3 +30,15 @@ def spectral_flatness(x):
 
 def rms(x):
     return np.sqrt(np.mean(np.square(x)))
+
+
+def f0(x, fs, return_index=False):
+    z = np.fft.rfft(x)
+    freqs = np.fft.fftfreq(len(x), 1 / fs)
+    i = np.argmax(np.abs(z[1:])) + 1
+    f = freqs[i]
+
+    if return_index:
+        return f, i
+
+    return f

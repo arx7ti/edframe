@@ -9,6 +9,7 @@ from numbers import Number
 from inspect import isfunction
 
 from .decorators import feature
+from ..features import f0
 from ..signals.exceptions import NotEnoughPeriods
 from ..signals import FITPS, downsample, upsample, roll
 from ..utils.common import nested_dict
@@ -106,6 +107,14 @@ class VI(Gen):
         dphi = phi[np.argmax(a)]
 
         return dphi
+
+    @feature
+    def f0(self):
+        return f0(self.v, self.fs)
+
+    # @feature
+    # def power_factor(self):
+    #     pf = self.phase_shift / math.sqrt(1 + thd(self.i))
 
     def components_required(self, required=True):
         self._require_components = required
