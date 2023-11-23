@@ -105,6 +105,10 @@ class VI(Gen):
     def __len__(self):
         return self.data.shape[1]
 
+    def _get_dims(self):
+        dims = (-1, *self._dims) if self.n_components > 1 else self._dims
+        return dims
+
     def __getitem__(self, indexer):
         # FIXME if n_components > 1
         if isinstance(indexer, tuple):
@@ -120,8 +124,7 @@ class VI(Gen):
             elif _ != Ellipsis:
                 raise ValueError
 
-            dims = (-1, *self._dims) if self.n_components > 1 else self._dims
-            data = self.data.reshape(2, *dims)
+            data = self.data.reshape(2, *self._get_dims())
             keep_aligned = True
         elif not isinstance(indexer, slice):
             raise ValueError
@@ -212,21 +215,20 @@ class VI(Gen):
                         dims=self._dims)
 
     def cycle(self, mode='mean'):
-        # FIXME if n_components > 1
         if not self.is_aligned():
             self = self.align()
 
-        data = self.data.reshape(2, *self._dims)
+        data = self.data.reshape(2, *self._get_dims())
 
         if mode == 'mean':
-            data = np.mean(data, axis=1)
+            data = np.mean(data, axis=-2)
         elif mode == 'median':
-            data = np.median(data, axis=1)
+            data = np.median(data, axis=-2)
         else:
             raise ValueError
 
         v, i = data
-        dims = 1, len(v)
+        dims = 1, v.shape[-1]
 
         return self.new(v, i, self.fs, is_aligned=self.is_aligned(), dims=dims)
 
