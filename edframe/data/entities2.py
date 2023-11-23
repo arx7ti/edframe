@@ -103,7 +103,7 @@ class VI(Gen):
         super().__init__(data, fs, y=y, locs=locs)
 
     def __len__(self):
-        return self.data.shape[1]
+        return self.data.shape[-1]
 
     def _get_dims(self):
         dims = (-1, *self._dims) if self.n_components > 1 else self._dims
@@ -205,8 +205,7 @@ class VI(Gen):
             v = downsample(self.__v, self.fs, fs)
             i = downsample(self.__i, self.fs, fs)
         else:
-            v = self.__v
-            i = self.__i
+            v, i = self.data
 
         return self.new(v,
                         i,
@@ -233,26 +232,28 @@ class VI(Gen):
         return self.new(v, i, self.fs, is_aligned=self.is_aligned(), dims=dims)
 
     def roll(self, n, outer=False):
-        # FIXME if n_components > 1
         if n == 0:
-            return self.new(self.v, self.i, self.fs)
+            return self.new(self.__v,
+                            self.__i,
+                            self.fs,
+                            is_aligned=self.is_aligned(),
+                            dims=self._dims)
 
         n = len(self) if abs(n) > len(self) else n
 
         if outer and not self.is_aligned():
-            self = self.align()
+            raise ValueError
 
         if outer:
-            _, p = self._dims
+            *_, p = self._get_dims()
             v, i = roll(self.data, abs(n) // p * p)
         else:
-            i = roll(self.i, n)
-            v = self.v
+            v, i = self.data
+            i = roll(i, n)
 
-        if n < 0:
-            i[n:] = 0
-        else:
-            i[:n] = 0
+        mute = np.s_[n:] if n < 0 else np.s_[:n]
+        mute = np.s_[:, mute] if self.n_components > 1 else np.s_[:n]
+        i[mute] = 0
 
         return self.new(v,
                         i,
