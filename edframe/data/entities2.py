@@ -97,7 +97,15 @@ class VI(Gen):
 
     @feature
     def phase_shift(self):
-        raise NotImplementedError
+        v, i = self.v, self.i
+        zv = np.fft.rfft(v)
+        zi = np.fft.rfft(i)
+
+        x = zv * np.conj(zi)
+        a, phi = np.abs(x), np.angle(x)
+        dphi = phi[np.argmax(a)]
+
+        return dphi
 
     def components_required(self, required=True):
         self._require_components = required
