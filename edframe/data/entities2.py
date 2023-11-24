@@ -125,7 +125,7 @@ class VI(Gen):
     @feature
     def power_factor(self):
         # TODO move to `..features`
-        pf = self.phase_shift() / np.sqrt(1 + self.thd()**2)
+        pf = np.cos(self.phase_shift()) / np.sqrt(1 + self.thd()**2)
         return pf
 
     def components_required(self, required=True):
