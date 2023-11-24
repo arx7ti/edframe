@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import numpy as np
 from scipy.stats import gmean
+from numba import njit
 
 
-def spectral_centroid(x: np.ndarray, normalized: bool = True) -> float:
-    a = np.abs(np.fft.rfft(x, axis=-1))[..., 1:]
+def spectral_centroid(x, normalized):
+    a = abs(np.fft.rfft(x, axis=-1))[..., 1:]
     arange = np.arange(1, a.shape[-1] + 1)
     arange = np.expand_dims(arange, axis=tuple(range(len(a.shape) - 1)))
     s = (a * arange).sum(-1) / a.sum(-1)
@@ -17,28 +18,52 @@ def spectral_centroid(x: np.ndarray, normalized: bool = True) -> float:
 
 
 def temporal_centroid(x):
-    x = np.abs(np.fft.rfft(x))[2:]
+    x = abs(np.fft.rfft(x))[2:]
     x = (x * 60 * np.arange(1, len(x) + 1)).sum() / x.sum()
     return x
 
 
 def spectral_flatness(x):
-    x = np.abs(np.fft.rfft(x))[1:]
-    x = gmean(x) / np.mean(x)
+    x = abs(np.fft.rfft(x))[1:]
+    x = gmean(x) / x.mean()
     return x
 
 
 def rms(x):
-    return np.sqrt(np.mean(np.square(x)))
+    return np.sqrt(np.square(x).mean())
 
 
-def f0(x, fs, return_index=False):
-    z = np.fft.rfft(x)
-    freqs = np.fft.fftfreq(len(x), 1 / fs)
-    i = np.argmax(np.abs(z[1:])) + 1
-    f = freqs[i]
+@njit
+def zero_crossing_rate(x, mode='median'):
+    x0 = np.empty(0, dtype=np.int32)
 
-    if return_index:
-        return f, i
+    for j in np.arange(len(x) - 1, dtype=np.int32):
+        if ((x[j] > x.dtype.type(0.0)) & (x[j + 1] <= x.dtype.type(0.0))) or (
+            (x[j] < x.dtype.type(0.0)) & (x[j + 1] >= x.dtype.type(0.0))):
+            x0 = np.append(x0, j)
+        else:
+            continue
 
-    return f
+    if len(x0) % 2 == 0:
+        x0 = x0[:-1]
+
+    if mode == 'mean':
+        x0_rate = 2 * np.diff(x0).mean()
+    elif mode == 'median':
+        x0_rate = 2 * np.median(np.diff(x0))
+    else:
+        raise ValueError
+
+    return x0_rate
+
+
+def fundamental(x, fs, mode='median'):
+    x0_rate = zero_crossing_rate(x, mode=mode)
+    f0 = fs / x0_rate
+    return f0
+
+
+def thd(x):
+    a = abs(np.fft.rfft(x))
+    v = np.sqrt((a[2:]**2).sum()) / abs(a[1])
+    return v

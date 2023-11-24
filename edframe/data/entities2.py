@@ -9,7 +9,7 @@ from numbers import Number
 from inspect import isfunction
 
 from .decorators import feature
-from ..features import f0
+from ..features import fundamental, thd
 from ..signals.exceptions import NotEnoughPeriods
 from ..signals import FITPS, downsample, upsample, roll
 from ..utils.common import nested_dict
@@ -40,6 +40,7 @@ class Gen:
         self._fs = fs
         self._y = y
         self._locs = locs
+        self._require_components = True
 
 
 class L(Gen):
@@ -98,6 +99,7 @@ class VI(Gen):
 
     @feature
     def phase_shift(self):
+        # TODO move to `..features`
         v, i = self.v, self.i
         zv = np.fft.rfft(v)
         zi = np.fft.rfft(i)
@@ -109,12 +111,22 @@ class VI(Gen):
         return dphi
 
     @feature
-    def f0(self):
-        return f0(self.v, self.fs)
+    def f0(self, mode='median'):
+        return fundamental(self.v, self.fs, mode=mode)
 
-    # @feature
-    # def power_factor(self):
-    #     pf = self.phase_shift / math.sqrt(1 + thd(self.i))
+    @feature
+    def if0(self, mode='median'):
+        return fundamental(self.i, self.fs, mode=mode)
+
+    @feature
+    def thd(self):
+        return thd(self.i, self.fs)
+
+    @feature
+    def power_factor(self):
+        # TODO move to `..features`
+        pf = self.phase_shift() / np.sqrt(1 + self.thd()**2)
+        return pf
 
     def components_required(self, required=True):
         self._require_components = required
