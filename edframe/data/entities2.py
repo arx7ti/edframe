@@ -9,7 +9,7 @@ from numbers import Number
 from inspect import isfunction
 
 from .decorators import feature
-from ..features import fundamental, thd
+from ..features import fundamental, spectrum, thd
 from ..signals.exceptions import NotEnoughPeriods
 from ..signals import FITPS, downsample, upsample, roll
 from ..utils.common import nested_dict
@@ -119,14 +119,22 @@ class VI(Gen):
         return fundamental(self.i, self.fs, mode=mode)
 
     @feature
-    def thd(self):
-        return thd(self.i, self.fs)
+    def thd(self, **kwargs):
+        return thd(self.i, self.fs, f0=self.f0(), **kwargs)
 
     @feature
-    def power_factor(self):
+    def power_factor(self, **kwargs):
         # TODO move to `..features`
-        pf = np.cos(self.phase_shift()) / np.sqrt(1 + self.thd()**2)
+        pf = np.cos(self.phase_shift()) / np.sqrt(1 + self.thd(**kwargs)**2)
         return pf
+
+    @feature
+    def spec(self, **kwargs):
+        return spectrum(self.i, self.fs, f0=self.f0(), **kwargs)
+
+    @feature
+    def vspec(self, **kwargs):
+        return spectrum(self.v, self.fs, **kwargs)
 
     def components_required(self, required=True):
         self._require_components = required

@@ -63,7 +63,24 @@ def fundamental(x, fs, mode='median'):
     return f0
 
 
-def thd(x):
-    a = abs(np.fft.rfft(x))
-    v = np.sqrt((a[2:]**2).sum()) / abs(a[1])
+def spectrum(x, fs, f0=None, **kwargs):
+    z = np.fft.rfft(x)
+    a, phi = abs(z), np.angle(z)
+    freqs = np.fft.rfftfreq(len(x), 1 / fs)
+
+    if f0 is None:
+        f0 = fundamental(x, fs, **kwargs)
+
+    f0_idx = np.argmin(abs(freqs - f0))
+    f_idxs = f0_idx * np.arange(1, len(a) // f0_idx)
+
+    a0, a, phi = a[0], a[f_idxs], phi[f_idxs]
+
+    return a0, a, phi
+
+
+def thd(x, fs, f0=None, **kwargs):
+    _, a, _ = spectrum(x, fs, f0=f0, **kwargs)
+    v = np.sqrt((a[1:]**2).sum()) / a[0]
+
     return v
