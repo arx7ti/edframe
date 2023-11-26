@@ -44,7 +44,7 @@ def upsample(
 
     t0 = np.linspace(0, 1, n, dtype=x.dtype)
     t1 = np.linspace(0, 1, n_new, dtype=x.dtype)
-    mean = x.mean(keepdims=True)
+    mean = x.mean(axis, keepdims=True)
     x = x - mean
     upsampler = interp1d(t0, x, kind=kind, axis=axis)
     x = upsampler(t1)

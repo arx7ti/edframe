@@ -243,11 +243,11 @@ class VI(Gen):
 
     def resample(self, fs, **kwargs):
         if fs > self.fs:
-            v = upsample(self.__v, self.fs, fs, **kwargs)
-            i = upsample(self.__i, self.fs, fs, **kwargs)
+            v, i = upsample(self.data, self.fs, fs, **kwargs)
+            # i = upsample(self.__i, self.fs, fs, **kwargs)
         elif fs < self.fs:
-            v = downsample(self.__v, self.fs, fs)
-            i = downsample(self.__i, self.fs, fs)
+            v, i = downsample(self.data, self.fs, fs)
+            # i = downsample(self.__i, self.fs, fs)
         else:
             v, i = self.data
 
