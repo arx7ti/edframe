@@ -201,7 +201,7 @@ class F:
 
 def fryze(v, i):
     s = v * i
-    ia = s.mean() * v / rms(v)**2
+    ia = s.mean(-1, keepdims=True) * v / rms(v, axis=-1, keepdims=True)**2
     ir = i - ia
     return ia, ir
 

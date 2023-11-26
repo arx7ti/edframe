@@ -29,8 +29,8 @@ def spectral_flatness(x):
     return x
 
 
-def rms(x):
-    return np.sqrt(np.square(x).mean())
+def rms(x, axis=-1, keepdims=False):
+    return np.sqrt(np.square(x).mean(axis, keepdims=keepdims))
 
 
 @njit

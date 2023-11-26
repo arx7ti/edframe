@@ -317,13 +317,13 @@ class VI(Gen):
 
     def fryze(self):
         # TODO component-wise
-        i_a, i_r = fryze(self.v, self.i)
-        via = self.new(self.v,
+        i_a, i_r = fryze(*self.data)
+        via = self.new(self.__v,
                        i_a,
                        fs=self.fs,
                        is_aligned=self.is_aligned(),
                        dims=self._dims)
-        vir = self.new(self.v,
+        vir = self.new(self.__v,
                        i_r,
                        fs=self.fs,
                        is_aligned=self.is_aligned(),
