@@ -11,7 +11,7 @@ from inspect import isfunction
 from .decorators import feature
 from ..features import fundamental, spectrum, thd
 from ..signals.exceptions import NotEnoughPeriods
-from ..signals import FITPS, downsample, upsample, roll
+from ..signals import FITPS, downsample, upsample, roll, fryze
 from ..utils.common import nested_dict
 
 
@@ -314,6 +314,22 @@ class VI(Gen):
                         self.fs,
                         is_aligned=self.is_aligned(),
                         dims=self._dims)
+
+    def fryze(self):
+        # TODO component-wise
+        i_a, i_r = fryze(self.v, self.i)
+        via = self.new(self.v,
+                       i_a,
+                       fs=self.fs,
+                       is_aligned=self.is_aligned(),
+                       dims=self._dims)
+        vir = self.new(self.v,
+                       i_r,
+                       fs=self.fs,
+                       is_aligned=self.is_aligned(),
+                       dims=self._dims)
+
+        return via, vir
 
     def features(self, features, format='list', **kwargs):
         data = []

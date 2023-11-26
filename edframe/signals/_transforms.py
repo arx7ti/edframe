@@ -1,12 +1,14 @@
 from __future__ import annotations
 
-import inspect
 from scipy.signal import resample
 from scipy.interpolate import interp1d
 from typing import Union, Any, Callable
 from statsmodels.tsa.ar_model import AutoReg
 
+import inspect
 import numpy as np
+
+from ..features import rms
 
 
 def identity(x: np.ndarray):
@@ -195,3 +197,14 @@ class F:
         ps = ps.update(**data)
 
         return ps
+
+
+def fryze(v, i):
+    s = v * i
+    ia = s.mean() * v / rms(v)**2
+    ir = i - ia
+    return ia, ir
+
+
+def budeanu(v, i):
+    raise NotImplementedError

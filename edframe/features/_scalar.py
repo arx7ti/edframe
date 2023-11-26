@@ -60,6 +60,7 @@ def zero_crossing_rate(x, mode='median'):
 def fundamental(x, fs, mode='median'):
     x0_rate = zero_crossing_rate(x, mode=mode)
     f0 = fs / x0_rate
+
     return f0
 
 
