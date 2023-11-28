@@ -8,7 +8,7 @@ from beartype.typing import Iterable
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import MultiLabelBinarizer
 from typing import Optional, Callable, Union, Any, Iterable
-from edframe.signals import F, pad, roll, extrapolate, replicate, upsample, downsample, crop
+from edframe.signals import pad, roll, extrapolate, replicate, upsample, downsample, crop
 
 # import torch
 import random

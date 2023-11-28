@@ -11,7 +11,7 @@ from inspect import isfunction
 from .decorators import feature
 from ..features import fundamental, spectrum, thd
 from ..signals.exceptions import NotEnoughPeriods
-from ..signals import FITPS, downsample, upsample, roll, fryze
+from ..signals import FITPS, downsample, upsample, roll, fryze, extrapolate
 from ..utils.common import nested_dict
 
 
@@ -96,6 +96,15 @@ class VI(Gen):
             return [self.data[:, i] for i in range(self.n_components)]
 
         return []
+
+    @property
+    def locs(self):
+        if self._locs is None and self._y is not None:
+            return [[0, len(self)] * len(self._y)]
+        elif self._locs is not None:
+            return self._locs
+
+        return None
 
     @feature
     def phase_shift(self):
@@ -224,6 +233,9 @@ class VI(Gen):
     def is_aligned(self):
         return self._is_aligned
 
+    def has_locs(self):
+        return self.locs is not None
+
     def is_empty(self):
         return len(self) == 0
 
@@ -231,13 +243,13 @@ class VI(Gen):
         # NOTE multi-component instance will be transformed into single-component
         fitps = FITPS()
 
-        try:
-            v, i = fitps(self.v, self.i, fs=self.fs)
-            dims = v.shape
-            v, i = v.ravel(), i.ravel()
-        except NotEnoughPeriods:
-            v, i = self.v, self.i
-            dims = 1, len(v)
+        # try:
+        v, i = fitps(self.v, self.i, fs=self.fs)
+        dims = v.shape
+        v, i = v.ravel(), i.ravel()
+        # except NotEnoughPeriods:
+        # v, i = self.v, self.i
+        # dims = 1, len(v)
 
         return self.new(v, i, self.fs, is_aligned=True, dims=dims)
 
@@ -251,11 +263,19 @@ class VI(Gen):
         else:
             v, i = self.data
 
+        locs = None
+
+        if self.has_locs():
+            locs = np.asarray(self.locs)
+            locs = np.round(locs * fs / self.fs).astype(int)
+            locs = locs.tolist()
+
         return self.new(v,
                         i,
                         fs,
                         is_aligned=self.is_aligned(),
-                        dims=self._dims)
+                        dims=self._dims,
+                        locs=locs)
 
     def cycle(self, mode='mean'):
         if not self.is_aligned():
@@ -299,11 +319,45 @@ class VI(Gen):
         mute = np.s_[:, mute] if self.n_components > 1 else np.s_[:n]
         i[mute] = 0
 
+        locs = None
+
+        if self.has_locs():
+            locs = np.asarray(self.locs)
+            locs = np.clip(locs + n, a_min=0, a_max=len(self))
+            locs = locs.tolist()
+
         return self.new(v,
                         i,
                         self.fs,
                         is_aligned=self.is_aligned(),
-                        dims=self._dims)
+                        dims=self._dims,
+                        locs=locs)
+
+    def extrapolate(self, n, **kwargs):
+        if not self.is_aligned():
+            raise NotImplementedError
+
+        if self.n_components > 1:
+            raise NotImplementedError
+
+        v, i = self.data.reshape(2, *self._get_dims())
+        is_aligned = self.is_aligned() if n % v.shape[1] == 0 else False
+        v = extrapolate(v, n, **kwargs)
+        i = extrapolate(i, n, **kwargs)
+
+        locs = None
+
+        if self.has_locs():
+            locs = np.asarray(self.locs)
+            locs[:, 1] += n
+            locs = locs.tolist()
+
+        return self.new(v,
+                        i,
+                        self.fs,
+                        is_aligned=is_aligned,
+                        dims=self._dims,
+                        locs=locs)
 
     def unitscale(self):
         v, i = self.data

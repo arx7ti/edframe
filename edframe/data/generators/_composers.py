@@ -12,7 +12,7 @@ import math
 import warnings
 import numpy as np
 
-from ..entities import DataSet
+# from ..entities import DataSet
 
 
 class Composer:

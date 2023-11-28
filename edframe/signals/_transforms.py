@@ -5,10 +5,35 @@ from scipy.interpolate import interp1d
 from typing import Union, Any, Callable
 from statsmodels.tsa.ar_model import AutoReg
 
+import math
 import inspect
 import numpy as np
 
-from ..features import rms
+from ..features import rms, spectral_centroid
+from ..data.generators import make_periods_from
+
+
+def _align_variation(v1, v2):
+    order = []
+
+    for k in range(len(v1)):
+        tmp = []
+
+        for j in range(len(v2)):
+            d = abs(v1[k] - v2[j])
+            tmp.append((d, j))
+
+        tmp = list(sorted(tmp, key=lambda x: x[0]))
+        tmp = [x for _, x in tmp]
+
+        for j in tmp:
+            if j not in order:
+                order.append(j)
+                break
+
+    order = np.asarray(order)
+
+    return order
 
 
 def identity(x: np.ndarray):
@@ -132,71 +157,93 @@ def replicate(
     return x
 
 
-def extrapolate(x: np.ndarray, n: int, lags: int) -> np.ndarray:
-    if len(x.shape) > 1:
-        raise NotImplementedError
+def extrapolate(x0, n, **kwargs):
+    assert n > 0
+    assert len(x0.shape) == 2
 
-    if x.shape[0] == 1:
-        raise NotImplementedError
+    n0 = len(x0)
+    n_max = n
+    n = math.ceil(n / x0.shape[1])
 
-    if x.shape[0] == 2:
-        raise NotImplementedError
+    sc0 = spectral_centroid(x0, True)
+    sc0 = AutoReg(sc0, 1).fit().predict(start=n0, end=n0 + n - 1)
 
-    a = x.size
-    b = x.size + n - 1
-    autoreg = AutoReg(x, lags, trend='ct').fit()
-    xe = autoreg.predict(a, b).view()
-    x = np.concatenate((x, xe))
+    x = make_periods_from(x0, n_samples=n)
+    x = x / abs(x).max(1, keepdims=True)
+    sc = spectral_centroid(x, False)
+
+    order = _align_variation(sc0, sc)
+    x = x[order]
+
+    a0 = abs(x0).max(1)
+    t0 = np.linspace(0, 1, n0)
+    kind = kwargs.get('kind', 'linear')
+    interp = interp1d(t0, a0, kind=kind)
+
+    x0 = x0.ravel()
+    x = x.ravel()
+    n0, n = len(x0), len(x)
+    t0 = np.linspace(0, 1, n0)
+    a0 = interp(t0)
+
+    a = AutoReg(a0, 1).fit().predict(start=n0, end=n0 + n - 1)
+
+    x = a * x
+
+    if n_max < len(x):
+        x = x[:n_max]
+
+    x = np.concatenate((x0, x))
 
     return x
 
 
-class F:
+# class F:
 
-    def __init__(self, fn: Callable, map_out_args, **map_in_args) -> None:
+#     def __init__(self, fn: Callable, map_out_args, **map_in_args) -> None:
 
-        if len(map_out_args) == 0:
-            raise ValueError
+#         if len(map_out_args) == 0:
+#             raise ValueError
 
-        params = inspect.signature(fn).parameters.keys()
+#         params = inspect.signature(fn).parameters.keys()
 
-        for param in map_in_args.keys():
-            if param not in params:
-                raise ValueError
+#         for param in map_in_args.keys():
+#             if param not in params:
+#                 raise ValueError
 
-        self._fn = fn
-        self._map_out_args = map_out_args
-        self._map_in_args = map_in_args
+#         self._fn = fn
+#         self._map_out_args = map_out_args
+#         self._map_in_args = map_in_args
 
-    def __call__(self, ps: PowerSample) -> PowerSample:
+#     def __call__(self, ps: PowerSample) -> PowerSample:
 
-        data = {}
+#         data = {}
 
-        for fparam, attr in self._map_in_args.items():
-            if hasattr(ps, attr):
-                data.update({fparam: getattr(ps, attr)})
-            else:
-                raise ValueError("Parameter \"%s\" was not found" % attr)
+#         for fparam, attr in self._map_in_args.items():
+#             if hasattr(ps, attr):
+#                 data.update({fparam: getattr(ps, attr)})
+#             else:
+#                 raise ValueError("Parameter \"%s\" was not found" % attr)
 
-        result = self._fn(**data)
+#         result = self._fn(**data)
 
-        if not isinstance(result, tuple):
-            result = (result, )
+#         if not isinstance(result, tuple):
+#             result = (result, )
 
-        if len(result) < len(self._map_out_args):
-            raise ValueError
+#         if len(result) < len(self._map_out_args):
+#             raise ValueError
 
-        data = {}
+#         data = {}
 
-        for attr, v in zip(self._map_out_args, result):
-            if hasattr(ps, attr):
-                data.update({attr: v})
-            else:
-                raise ValueError
+#         for attr, v in zip(self._map_out_args, result):
+#             if hasattr(ps, attr):
+#                 data.update({attr: v})
+#             else:
+#                 raise ValueError
 
-        ps = ps.update(**data)
+#         ps = ps.update(**data)
 
-        return ps
+#         return ps
 
 
 def fryze(v, i):

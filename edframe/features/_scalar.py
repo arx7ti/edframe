@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import numpy as np
+
 from scipy.stats import gmean
-from numba import njit
+from ..utils.hf import zero_crossings
 
 
 def spectral_centroid(x, normalized):
@@ -33,19 +34,8 @@ def rms(x, axis=-1, keepdims=False):
     return np.sqrt(np.square(x).mean(axis, keepdims=keepdims))
 
 
-@njit
 def zero_crossing_rate(x, mode='median'):
-    x0 = np.empty(0, dtype=np.int32)
-
-    for j in np.arange(len(x) - 1, dtype=np.int32):
-        if ((x[j] > x.dtype.type(0.0)) & (x[j + 1] <= x.dtype.type(0.0))) or (
-            (x[j] < x.dtype.type(0.0)) & (x[j + 1] >= x.dtype.type(0.0))):
-            x0 = np.append(x0, j)
-        else:
-            continue
-
-    if len(x0) % 2 == 0:
-        x0 = x0[:-1]
+    x0 = zero_crossings(x)
 
     if mode == 'mean':
         x0_rate = 2 * np.diff(x0).mean()

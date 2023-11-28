@@ -117,7 +117,7 @@ class FITPS:
     def _compute_roots(v: np.ndarray) -> np.ndarray:
         v0 = np.empty(0, dtype=np.int32)
         for j in np.arange(len(v) - 1, dtype=np.int32):
-            if (v[j] < v.dtype.type(0.0)) & (v[j + 1] > v.dtype.type(0.0)):
+            if (v[j] < v.dtype.type(0.0)) & (v[j + 1] >= v.dtype.type(0.0)):
                 v0 = np.append(v0, j)
             else:
                 continue
