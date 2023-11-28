@@ -11,7 +11,7 @@ from inspect import isfunction
 from .decorators import feature
 from ..features import fundamental, spectrum, thd
 from ..signals.exceptions import NotEnoughPeriods
-from ..signals import FITPS, downsample, upsample, roll, fryze, extrapolate
+from ..signals import FITPS, downsample, upsample, roll, fryze, extrapolate, pad
 from ..utils.common import nested_dict
 
 
@@ -243,6 +243,7 @@ class VI(Gen):
         # NOTE multi-component instance will be transformed into single-component
         fitps = FITPS()
 
+        # try
         if self.has_locs():
             v, i, locs = fitps(self.v, self.i, fs=self.fs, locs=self.locs)
         else:
@@ -362,6 +363,26 @@ class VI(Gen):
                         is_aligned=is_aligned,
                         dims=self._dims,
                         locs=locs)
+
+    def pad(self, n, **kwargs):
+        if not self.is_aligned():
+            raise NotImplementedError
+
+        if self.n_components > 1:
+            raise NotImplementedError
+
+        v, i = self.data.reshape(2, *self._get_dims())
+        is_aligned = self.is_aligned() if n % v.shape[1] == 0 else False
+        v = extrapolate(v, n, **kwargs)
+        i = pad(i.ravel(), n, **kwargs)
+        print(v.shape, i.shape)
+
+        return self.new(v,
+                        i,
+                        self.fs,
+                        is_aligned=is_aligned,
+                        dims=self._dims,
+                        locs=self.locs)
 
     def unitscale(self):
         v, i = self.data
