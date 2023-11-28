@@ -55,57 +55,63 @@ class FITPS:
         i = self._allocate(i, v0, dv, ns)
 
         if locs is not None:
-            locs = self._transform_locs(locs, v0)
+            if not isinstance(locs, np.ndarray):
+                locs = np.asarray(locs)
+
+            locs -= v0[0]
+            locs[locs >= v0[-1]] = np.product(v.shape)
+            locs = np.clip(locs, a_min=0, a_max=None)
+
             return v, i, locs
         else:
             return v, i
 
-    @staticmethod
-    def _transform_locs(locs, v0):
-        shape = locs.shape
+    # @staticmethod
+    # def _transform_locs(locs, v0):
+        # shape = locs.shape
 
-        if len(shape) == 2:
-            locs = locs.ravel()
-        elif len(shape) != 1:
-            raise ValueError
+        # if len(shape) == 2:
+        #     locs = locs.ravel()
+        # elif len(shape) != 1:
+        #     raise ValueError
 
-        ord = np.argsort(locs)
+        # ord = np.argsort(locs)
 
-        j = 0
-        plocs_sorted = []
-        n_periods = len(v0) - 2
-        for loc in locs[ord]:
-            if loc < v0[0]:
-                plocs_sorted.append(np.NINF)
-            elif loc > v0[-2]:
-                plocs_sorted.append(np.Inf)
-            else:
-                for k in range(j, n_periods):
-                    if (loc >= v0[k]) & (loc < v0[k + 1]):
-                        plocs_sorted.append(k)
-                        j = k
-                        break
+        # j = 0
+        # plocs_sorted = []
+        # n_periods = len(v0) - 2
+        # for loc in locs[ord]:
+        #     if loc < v0[0]:
+        #         plocs_sorted.append(np.NINF)
+        #     elif loc > v0[-2]:
+        #         plocs_sorted.append(np.Inf)
+        #     else:
+        #         for k in range(j, n_periods):
+        #             if (loc >= v0[k]) & (loc < v0[k + 1]):
+        #                 plocs_sorted.append(k)
+        #                 j = k
+        #                 break
 
-        assert len(plocs_sorted) == len(locs)
+        # assert len(plocs_sorted) == len(locs)
 
-        plocs = np.empty(len(ord), dtype=float)
-        for i, j in enumerate(ord):
-            plocs[j] = plocs_sorted[i]
+        # plocs = np.empty(len(ord), dtype=float)
+        # for i, j in enumerate(ord):
+        #     plocs[j] = plocs_sorted[i]
 
-        # Calibration
-        if len(shape) == 2:
-            plocs = plocs.reshape(*shape)
-            q1 = (plocs[:, 0] == np.NINF) & (plocs[:, 1] == np.NINF)
-            q2 = (plocs[:, 0] == np.Inf) & (plocs[:, 1] == np.Inf)
-            q3 = (plocs[:, 0] == np.NINF) & (plocs[:, 1] != np.NINF)
-            q4 = (plocs[:, 0] != np.Inf) & (plocs[:, 1] == np.Inf)
-            plocs[q1 | q2] = -1
-            plocs[q3, 0] = 0
-            plocs[q4, 1] = n_periods - 1
+        # # Calibration
+        # if len(shape) == 2:
+        #     plocs = plocs.reshape(*shape)
+        #     q1 = (plocs[:, 0] == np.NINF) & (plocs[:, 1] == np.NINF)
+        #     q2 = (plocs[:, 0] == np.Inf) & (plocs[:, 1] == np.Inf)
+        #     q3 = (plocs[:, 0] == np.NINF) & (plocs[:, 1] != np.NINF)
+        #     q4 = (plocs[:, 0] != np.Inf) & (plocs[:, 1] == np.Inf)
+        #     plocs[q1 | q2] = -1
+        #     plocs[q3, 0] = 0
+        #     plocs[q4, 1] = n_periods - 1
 
-        plocs = plocs.astype(int)
+        # plocs = plocs.astype(int)
 
-        return plocs
+        # return plocs
 
     # def _filter_v(self, v: np.ndarray) -> np.ndarray:
     #     f1, f2 = butter(self._n, self._cf)
@@ -116,6 +122,7 @@ class FITPS:
     @njit
     def _compute_roots(v: np.ndarray) -> np.ndarray:
         v0 = np.empty(0, dtype=np.int32)
+
         for j in np.arange(len(v) - 1, dtype=np.int32):
             if (v[j] < v.dtype.type(0.0)) & (v[j + 1] >= v.dtype.type(0.0)):
                 v0 = np.append(v0, j)
@@ -127,6 +134,7 @@ class FITPS:
     @njit
     def _compute_shifts(v: np.ndarray, v0: np.ndarray) -> np.ndarray:
         dv = np.empty(0, dtype=v.dtype)
+
         for j in np.arange(len(v0) - 1, dtype=np.int32):
             k = v0[j]
             dv = np.append(dv, -v[k] / (v[k + 1] - v[k]))
@@ -144,9 +152,11 @@ class FITPS:
         n_periods = len(dv) - 1
         mat = np.zeros((n_periods, ns_int), dtype=vec.dtype)
         v0 = v0.astype(vec.dtype)
+
         for j in np.arange(n_periods, dtype=np.int32):
             length = (v0[j + 1] + dv[j + 1]) - (v0[j] + dv[j])
             dist = length / ns_float
+
             for k in np.arange(ns_int, dtype=np.int32):
                 k1 = v0[j] + dv[j] + dist * vec.dtype.type(k)
                 k2 = np.int32(np.floor(k1))

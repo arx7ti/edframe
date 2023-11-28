@@ -243,15 +243,19 @@ class VI(Gen):
         # NOTE multi-component instance will be transformed into single-component
         fitps = FITPS()
 
-        # try:
-        v, i = fitps(self.v, self.i, fs=self.fs)
+        if self.has_locs():
+            v, i, locs = fitps(self.v, self.i, fs=self.fs, locs=self.locs)
+        else:
+            v, i = fitps(self.v, self.i, fs=self.fs)
+            locs = None
+
         dims = v.shape
         v, i = v.ravel(), i.ravel()
         # except NotEnoughPeriods:
         # v, i = self.v, self.i
         # dims = 1, len(v)
 
-        return self.new(v, i, self.fs, is_aligned=True, dims=dims)
+        return self.new(v, i, self.fs, is_aligned=True, dims=dims, locs=locs)
 
     def resample(self, fs, **kwargs):
         if fs > self.fs:
