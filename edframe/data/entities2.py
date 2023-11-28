@@ -239,6 +239,7 @@ class VI(Gen):
     def is_empty(self):
         return len(self) == 0
 
+    # TODO rename to `sync`
     def align(self):
         # NOTE multi-component instance will be transformed into single-component
         fitps = FITPS()
@@ -485,4 +486,48 @@ class P(L):
         super().__init__(p, fs)
 
     def resample(self, fs):
+        raise NotImplementedError
+
+
+class VISet:
+
+    @property
+    def n_appliances(self):
+        raise NotImplementedError
+
+    @property
+    def n_signatures(self):
+        raise NotImplementedError
+
+    @property
+    def size(self):
+        return self.n_signatures
+
+    def __init__(self, data) -> None:
+        self._build(data)
+
+    def _build(self, data):
+        ls = [len(vi) for vi in data]
+        fs = [vi.fs for vi in data]
+        f0 = [vi.f0 for vi in data]
+
+    def features(self):
+        raise NotImplementedError
+
+    def targets(self):
+        raise NotImplementedError
+
+    def stats(self):
+        raise NotImplementedError
+
+    def split(self):
+        raise NotImplementedError
+
+    def shuffle(self, random_state=None):
+        raise NotImplementedError
+
+    def to(self):
+        raise NotImplementedError
+
+    def hash(self):
         raise NotImplementedError
