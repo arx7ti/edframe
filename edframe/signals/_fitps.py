@@ -21,13 +21,12 @@ class FITPS:
     Frequency Invariant Transformation of Periodic Signals.
     """
 
-    # def __init__(
-    #     self,
-    #     n: int = 4,
-    #     cf: float = 0.01,
-    # ) -> None:
-    #     self._n = n
-    #     self._cf = cf
+    def __init__(self) -> None:
+        self._zero_crossings = None
+
+    @property
+    def zero_crossings(self):
+        return self._zero_crossings
 
     def __call__(
         self,
@@ -39,6 +38,7 @@ class FITPS:
     ) -> tuple[np.ndarray, ...]:
 
         v0 = self._compute_roots(v)
+        self._zero_crossings = v0
 
         if len(v0) < 2:
             raise NotEnoughPeriods
@@ -68,50 +68,50 @@ class FITPS:
 
     # @staticmethod
     # def _transform_locs(locs, v0):
-        # shape = locs.shape
+    # shape = locs.shape
 
-        # if len(shape) == 2:
-        #     locs = locs.ravel()
-        # elif len(shape) != 1:
-        #     raise ValueError
+    # if len(shape) == 2:
+    #     locs = locs.ravel()
+    # elif len(shape) != 1:
+    #     raise ValueError
 
-        # ord = np.argsort(locs)
+    # ord = np.argsort(locs)
 
-        # j = 0
-        # plocs_sorted = []
-        # n_periods = len(v0) - 2
-        # for loc in locs[ord]:
-        #     if loc < v0[0]:
-        #         plocs_sorted.append(np.NINF)
-        #     elif loc > v0[-2]:
-        #         plocs_sorted.append(np.Inf)
-        #     else:
-        #         for k in range(j, n_periods):
-        #             if (loc >= v0[k]) & (loc < v0[k + 1]):
-        #                 plocs_sorted.append(k)
-        #                 j = k
-        #                 break
+    # j = 0
+    # plocs_sorted = []
+    # n_periods = len(v0) - 2
+    # for loc in locs[ord]:
+    #     if loc < v0[0]:
+    #         plocs_sorted.append(np.NINF)
+    #     elif loc > v0[-2]:
+    #         plocs_sorted.append(np.Inf)
+    #     else:
+    #         for k in range(j, n_periods):
+    #             if (loc >= v0[k]) & (loc < v0[k + 1]):
+    #                 plocs_sorted.append(k)
+    #                 j = k
+    #                 break
 
-        # assert len(plocs_sorted) == len(locs)
+    # assert len(plocs_sorted) == len(locs)
 
-        # plocs = np.empty(len(ord), dtype=float)
-        # for i, j in enumerate(ord):
-        #     plocs[j] = plocs_sorted[i]
+    # plocs = np.empty(len(ord), dtype=float)
+    # for i, j in enumerate(ord):
+    #     plocs[j] = plocs_sorted[i]
 
-        # # Calibration
-        # if len(shape) == 2:
-        #     plocs = plocs.reshape(*shape)
-        #     q1 = (plocs[:, 0] == np.NINF) & (plocs[:, 1] == np.NINF)
-        #     q2 = (plocs[:, 0] == np.Inf) & (plocs[:, 1] == np.Inf)
-        #     q3 = (plocs[:, 0] == np.NINF) & (plocs[:, 1] != np.NINF)
-        #     q4 = (plocs[:, 0] != np.Inf) & (plocs[:, 1] == np.Inf)
-        #     plocs[q1 | q2] = -1
-        #     plocs[q3, 0] = 0
-        #     plocs[q4, 1] = n_periods - 1
+    # # Calibration
+    # if len(shape) == 2:
+    #     plocs = plocs.reshape(*shape)
+    #     q1 = (plocs[:, 0] == np.NINF) & (plocs[:, 1] == np.NINF)
+    #     q2 = (plocs[:, 0] == np.Inf) & (plocs[:, 1] == np.Inf)
+    #     q3 = (plocs[:, 0] == np.NINF) & (plocs[:, 1] != np.NINF)
+    #     q4 = (plocs[:, 0] != np.Inf) & (plocs[:, 1] == np.Inf)
+    #     plocs[q1 | q2] = -1
+    #     plocs[q3, 0] = 0
+    #     plocs[q4, 1] = n_periods - 1
 
-        # plocs = plocs.astype(int)
+    # plocs = plocs.astype(int)
 
-        # return plocs
+    # return plocs
 
     # def _filter_v(self, v: np.ndarray) -> np.ndarray:
     #     f1, f2 = butter(self._n, self._cf)

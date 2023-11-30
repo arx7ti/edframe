@@ -11,6 +11,7 @@ import numpy as np
 
 from ..features import rms, spectral_centroid
 from ..data.generators import make_periods_from
+from ._fitps import FITPS
 
 
 def _align_variation(v1, v2):
@@ -157,43 +158,115 @@ def replicate(
     return x
 
 
-def extrapolate(x0, n, **kwargs):
-    assert n > 0
-    assert len(x0.shape) == 2
+def extrapolate2d(x, n, **kwargs):
+    assert len(x.shape) == 2
 
-    n0 = len(x0)
-    n_max = n
-    n = math.ceil(n / x0.shape[1])
+    # Estimate spectral centroid for each cycle on the extrapolation interval
+    n_orig, n_samples = x.shape
+    sc = spectral_centroid(x, True)
+    sc = AutoReg(sc, 1).fit().predict(n_orig, n_orig + n - 1)
 
-    sc0 = spectral_centroid(x0, True)
-    sc0 = AutoReg(sc0, 1).fit().predict(start=n0, end=n0 + n - 1)
+    # Generate cycles for extrapolation interval
+    x_extra = make_periods_from(x, n_samples=n)
+    x_extra = x_extra / abs(x_extra).max(1, keepdims=True)
 
-    x = make_periods_from(x0, n_samples=n)
-    x = x / abs(x).max(1, keepdims=True)
-    sc = spectral_centroid(x, False)
+    # Compute actual spectral centroid for each cycle on the extrapolation interval
+    sc_extra = spectral_centroid(x_extra, False)
 
-    order = _align_variation(sc0, sc)
-    x = x[order]
+    # Order the generated samples with respect to the estimated spectral centroids
+    order = _align_variation(sc, sc_extra)
+    x_extra = x_extra[order]
 
-    a0 = abs(x0).max(1)
-    t0 = np.linspace(0, 1, n0)
+    # Estimate amplitude envelope on the extrapolation interval
+    a = abs(x).max(1)
+    t = np.linspace(0, 1, n_orig)
     kind = kwargs.get('kind', 'linear')
-    interp = interp1d(t0, a0, kind=kind)
+    n_orig_flat, n_extra_flat = np.product(x.shape), np.product(x_extra.shape)
+    t_flat = np.linspace(0, 1, n_orig_flat)
+    a_flat = interp1d(t, a, kind=kind)(t_flat)
+    a_extra = AutoReg(a_flat, 1).fit().predict(n_orig_flat,
+                                               n_orig_flat + n_extra_flat - 1)
+    a_extra = a_extra.reshape(-1, n_samples)
 
-    x0 = x0.ravel()
-    x = x.ravel()
-    n0, n = len(x0), len(x)
-    t0 = np.linspace(0, 1, n0)
-    a0 = interp(t0)
+    # Apply envelope
+    x_extra = a_extra * x_extra
 
-    a = AutoReg(a0, 1).fit().predict(start=n0, end=n0 + n - 1)
+    # Combine original and extrapolated signals
+    x = np.concatenate((x, x_extra))
 
-    x = a * x
+    return x
 
-    if n_max < len(x):
-        x = x[:n_max]
 
-    x = np.concatenate((x0, x))
+def extrapolate(x, n, v=None, **kwargs):
+    is_aligned = len(x.shape) == 2
+
+    if not is_aligned and v is None:
+        raise ValueError
+    elif not is_aligned:
+        n_orig = len(x)
+
+        # Obtain synchronized signal with equal number of samples per cycle
+        fitps = FITPS()
+        v2d, x2d = fitps(v, x)
+        v0 = fitps.zero_crossings
+
+        # Compensate missing cycles from the right after FITPS
+        dright = n_orig - v0[-2]
+    else:
+        n_orig = np.product(x.shape)
+        v2d, x2d = v, x
+        v0 = None
+        dright = 0
+
+    # Number of cycles that are basis for extrapolation
+    n_obs, n_samples = x2d.shape
+    # Number of cycles to extrapolate
+    n_extra = math.ceil((n + dright) / n_samples)
+    # Number of samples in the final signal
+    n_full = n + n_orig
+
+    v2d = v2d if v2d is None else extrapolate2d(v2d, n_extra, **kwargs)
+    x2d = extrapolate2d(x2d, n_extra, **kwargs)
+
+    if not is_aligned:
+        # Keep only extrapolated interval
+        v2d = v2d[-n_extra:]
+        x2d = x2d[-n_extra:]
+
+        # Extrapolate frequency fluctuations
+        dv0 = np.diff(v0)
+        dv0 = AutoReg(dv0, 1).fit().predict(n_obs, n_obs + n_extra - 1)
+        dv0 = np.round(dv0).astype(int)
+
+        # Apply frequency fluctuations over extrapolated signal
+        t_aligned = np.linspace(0, 1, n_samples)
+        crop = True
+
+        for vi, xi, n_samples_i in zip(v2d, x2d, dv0):
+            if n_samples_i != n_samples:
+                ti = np.linspace(0, 1, n_samples_i)
+                vi = interp1d(t_aligned, vi)(ti)
+                xi = interp1d(t_aligned, xi)(ti)
+
+            if dright > 0 and crop:
+                vi = vi[dright:]
+                xi = xi[dright:]
+                crop = False
+
+            v = np.concatenate((v, vi))
+            x = np.concatenate((x, xi))
+    else:
+        v = v if v is None else v2d.ravel()
+        x = x2d.ravel()
+
+    del v2d, x2d
+
+    if n_full < len(x):
+        v = v if v is None else v[:n_full]
+        x = x[:n_full]
+
+    if v is not None:
+        return v, x
 
     return x
 

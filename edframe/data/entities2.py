@@ -145,6 +145,18 @@ class VI(Gen):
     def vspec(self, **kwargs):
         return spectrum(self.v, self.fs, **kwargs)
 
+    @feature
+    def trajectory(self):
+        raise NotImplementedError
+
+    @feature
+    def spectral_centroid(self):
+        raise NotImplementedError
+
+    @feature
+    def temporal_centroid(self):
+        raise NotImplementedError
+
     def components_required(self, required=True):
         self._require_components = required
 
@@ -262,10 +274,8 @@ class VI(Gen):
     def resample(self, fs, **kwargs):
         if fs > self.fs:
             v, i = upsample(self.data, self.fs, fs, **kwargs)
-            # i = upsample(self.__i, self.fs, fs, **kwargs)
         elif fs < self.fs:
             v, i = downsample(self.data, self.fs, fs)
-            # i = downsample(self.__i, self.fs, fs)
         else:
             v, i = self.data
 
@@ -340,17 +350,18 @@ class VI(Gen):
                         locs=locs)
 
     def extrapolate(self, n, **kwargs):
-        if not self.is_aligned():
-            raise NotImplementedError
-
         if self.n_components > 1:
             raise NotImplementedError
 
-        v, i = self.data.reshape(2, *self._get_dims())
-        is_aligned = self.is_aligned() if n % v.shape[1] == 0 else False
-        v = extrapolate(v, n, **kwargs)
-        i = extrapolate(i, n, **kwargs)
+        if self.is_aligned():
+            dims = self._get_dims()
+            v, i = self.data.reshape(2, *dims)
+            is_aligned = n % dims[1] == 0
+        else:
+            v, i = self.data
+            is_aligned = False
 
+        v, i = extrapolate(i, n, v=v, **kwargs)
         locs = None
 
         if self.has_locs():
@@ -374,9 +385,9 @@ class VI(Gen):
 
         v, i = self.data.reshape(2, *self._get_dims())
         is_aligned = self.is_aligned() if n % v.shape[1] == 0 else False
+        # FIXME
         v = extrapolate(v, n, **kwargs)
         i = pad(i.ravel(), n, **kwargs)
-        print(v.shape, i.shape)
 
         return self.new(v,
                         i,
@@ -465,6 +476,9 @@ class VI(Gen):
 
         return data
 
+    def hash(self):
+        raise NotImplementedError
+
     def todict(self):
         data = {'v': self.v, 'i': self.i}
         return data
@@ -503,13 +517,82 @@ class VISet:
     def size(self):
         return self.n_signatures
 
-    def __init__(self, data) -> None:
-        self._build(data)
+    @property
+    def data(self):
+        raise NotImplementedError
 
-    def _build(self, data):
+    def __init__(self, data, **kwargs) -> None:
+        if isinstance(data, np.ndarray):
+            fs = kwargs.get('fs', None)
+            y = kwargs.get('y', None)
+            locs = kwargs.get('locs', None)
+            v, i = data
+
+            if fs is None:
+                raise ValueError
+
+            data = self._array_to_vi(v, i, fs, y=y, locs=locs)
+
+        self._build(data, **kwargs)
+
+    def _array_to_vi(self, v, i, fs, y=None, locs=None):
+        if len(v.shape) != 2:
+            raise ValueError
+        elif len(i.shape) != 2:
+            raise ValueError
+
+        data = data.transpose(1, 0, 2)
+
+        if y is None:
+            y = [None] * data.shape[1]
+
+        if locs is None:
+            locs = [None] * data.shape[1]
+
+        new_data = []
+
+        for vj, ij, yj, locsj in zip(data, y, locs):
+            vi = VI(v=vj, i=ij, fs=fs, y=yj, locs=locsj)
+            new_data.append(vi)
+
+        return new_data
+
+    def _build(self, data, **kwargs):
         ls = [len(vi) for vi in data]
         fs = [vi.fs for vi in data]
         f0 = [vi.f0 for vi in data]
+
+        if not all([fs[0] == f for f in fs[1:]]):
+            raise ValueError
+
+        if not all([f0[0] == f for f in f0[1:]]):
+            raise ValueError
+
+        l_mode = kwargs.get('len_mode', 'median')
+
+        if l_mode == 'median':
+            lsm = np.median(ls)
+        elif l_mode == 'mean':
+            lsm = np.mean(ls)
+        else:
+            raise ValueError
+
+        lsm = int(round(lsm))
+        new_data = []
+
+        for vi in data:
+            dn = lsm - len(vi)
+
+            # TODO if not aligned
+            if dn > 0:
+                vi = vi.extrapolate(dn)
+            else:
+                vi = vi[:lsm]
+
+            new_data.append(vi)
+
+        self._data = new_data
+        self._fs = vi.fs
 
     def features(self):
         raise NotImplementedError
