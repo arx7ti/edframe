@@ -163,7 +163,8 @@ def extrapolate2d(x, n, **kwargs):
 
     # Estimate spectral centroid for each cycle on the extrapolation interval
     n_orig, n_samples = x.shape
-    sc = spectral_centroid(x, True)
+    # sc = spectral_centroid(x, True)
+    sc = x.std(1)
     sc = AutoReg(sc, 1).fit().predict(n_orig, n_orig + n - 1)
 
     # Generate cycles for extrapolation interval
@@ -171,13 +172,16 @@ def extrapolate2d(x, n, **kwargs):
     x_extra = x_extra / abs(x_extra).max(1, keepdims=True)
 
     # Compute actual spectral centroid for each cycle on the extrapolation interval
-    sc_extra = spectral_centroid(x_extra, False)
+    # sc_extra = spectral_centroid(x_extra, True)
+    sc_extra = x_extra.std(1) 
 
     # Order the generated samples with respect to the estimated spectral centroids
-    order = _align_variation(sc, sc_extra)
-    x_extra = x_extra[order]
+    # FIXME extrapolate and apply time-correlation
+    # order = _align_variation(sc, sc_extra)
+    # x_extra = x_extra[order]
 
     # Estimate amplitude envelope on the extrapolation interval
+    # FIXME data centering
     a = abs(x).max(1)
     t = np.linspace(0, 1, n_orig)
     kind = kwargs.get('kind', 'linear')
@@ -198,6 +202,7 @@ def extrapolate2d(x, n, **kwargs):
 
 
 def extrapolate(x, n, v=None, **kwargs):
+    # FIXME if only one signal and non-aligned
     is_aligned = len(x.shape) == 2
 
     if not is_aligned and v is None:
