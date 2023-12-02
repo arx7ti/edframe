@@ -96,6 +96,8 @@ def make_periods(
 
     n_dist, app4mode = _distribute_samples(n_samples, n_appliances,
                                            n_modes_per_appliance)
+    n_samples_multiplier = kwargs.get('n_samples_multiplier', 1)
+    n_dist *= n_samples_multiplier
     n_modes = len(n_dist)
 
     for n, m in zip(n_dist, range(n_modes)):
@@ -173,26 +175,24 @@ def make_oscillations(
     period_size = round(fs / f0)
     time = np.linspace(0, dt, round(dt * f0 * period_size))
     n_cycles_per_signature = math.ceil(len(time) / period_size)
-    # FIXME not working as expected
-    n_samples = n_samples * n_cycles_per_signature
 
     psr_centers = np.random.uniform(*psr_range, n_appliances)
     decay_centers = np.random.uniform(*decay_range, n_appliances)
 
-    X, y = make_periods(n_samples=n_samples,
-                        n_appliances=n_appliances,
-                        n_modes_per_appliance=n_modes_per_appliance,
-                        cluster_std=cluster_std,
-                        output_size=period_size,
-                        ac_range=ac_range,
-                        **periods_kwargs)
+    Xc, y = make_periods(n_samples=n_samples,
+                         n_appliances=n_appliances,
+                         n_modes_per_appliance=n_modes_per_appliance,
+                         cluster_std=cluster_std,
+                         output_size=period_size,
+                         ac_range=ac_range,
+                         n_samples_multiplier=n_cycles_per_signature,
+                         **periods_kwargs)
 
-    signatures = []
+    X = []
 
     for k in np.unique(y):
-        Xk = X[y == k]
+        Xk = Xc[y == k]
         Xk = Xk.reshape(-1, n_cycles_per_signature * period_size)
-        Xk = Xk[:, :len(time)]
         n = len(Xk)
 
         decay = cluster_std * abs(np.random.randn(n, 1))
@@ -205,12 +205,13 @@ def make_oscillations(
 
         Xk *= 1 + (psr * np.exp(-decay * time[None]))
 
-        signatures.append(Xk)
+        X.append(Xk)
 
-    signatures = np.concatenate(signatures)
+    X = np.concatenate(X)
+    X = X[:, :len(time)]
     y = y[::n_cycles_per_signature]
 
-    return signatures, y
+    return X, y
 
 
 def make_rms_cycle(
