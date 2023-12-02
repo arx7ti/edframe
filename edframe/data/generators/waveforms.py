@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 from scipy.stats import lognorm
 from scipy.signal import impulse
+from scipy.linalg import toeplitz
 from datetime import datetime, timedelta
 
 # Internal packages
@@ -79,13 +80,16 @@ def make_periods(
         a_loc=5,
         centers=(-10, 10, 20),
         s_range=(0.5, 2),
+        ac_range=(0, 100),
         z0_range=(0, 1e-1),
         cluster_std=1,
         noise_std=1e-4,
+        **kwargs,
 ):
     assert h_loc > 1 and h_loc <= output_size // 2
     # assert n_samples >= n_modes_per_appliance # FIXME array support
 
+    eps = kwargs.get('eps', 1e-12)
     re0, re1, imw = centers
     X = np.empty((0, output_size), dtype=float)
     y = np.empty((0, ), dtype=int)
@@ -98,16 +102,24 @@ def make_periods(
         app = app4mode[m]
         h = np.random.poisson(h_loc)  # max harmonics
         h = np.clip(h, a_min=2, a_max=output_size // 2)
+        ac_coef = np.random.uniform(*ac_range)
         a = np.random.poisson(a_loc)
         s = np.random.uniform(*s_range)
+        m_theta = np.random.uniform(-np.pi, np.pi)
+        m_theta = [m_theta] * n
+        m_r = np.zeros(n)
 
-        # Basis for random variables
-        theta = np.random.uniform(-np.pi, np.pi, (n, h + 1))
-        r = cluster_std * np.abs(np.random.randn(n, h + 1))
+        # Toeplitz matrix for time-correlation
+        ac = np.exp(-np.linspace(0, 1, n) / (ac_coef + eps))
+        # TODO check `cluster_std *`
+        tpl = cluster_std * toeplitz(ac)
 
+        # Basis for time-correlated random variables
+        theta = np.random.multivariate_normal(m_theta, tpl, size=h + 1).T
+        r = np.abs(np.random.multivariate_normal(m_r, tpl, size=h + 1)).T
         r_max = r.max(0, keepdims=True)
 
-        # Vertices of classes
+        # Vertices of appliances
         re = np.random.uniform(re0, re1, (1, h + 1))
         im = np.random.uniform(-r_max - imw, -r_max, (1, h + 1))
         z0 = np.random.uniform(*z0_range)
@@ -147,11 +159,10 @@ def make_periods(
 
 def make_oscillations(
         n_samples=100,
-        p_diversity=0.5,
-        diversity=1,
         n_appliances=1,
         n_modes_per_appliance=1,
         cluster_std=1,
+        ac_range=(0, 100),
         psr_range=(1, 5),
         decay_range=(5, 50),
         dt=1.0,
@@ -159,43 +170,32 @@ def make_oscillations(
         f0=50.,
         **periods_kwargs,
 ):
-    n_reps = math.ceil(dt * f0)
     period_size = round(fs / f0)
     time = np.linspace(0, dt, round(dt * f0 * period_size))
+    n_cycles_per_signature = math.ceil(len(time) / period_size)
+    n_samples = n_samples * n_cycles_per_signature
 
-    if diversity == 0:
-        divs = np.ones(n_appliances)
-    else:
-        divs = np.random.poisson(diversity, n_appliances)
-        divs = np.clip(divs, a_min=1, a_max=None)
-        divmask = np.random.choice([True, False],
-                                   size=len(divs),
-                                   p=(p_diversity, 1 - p_diversity))
-        divs[~divmask] = 1
-
-    n_samples = np.round(n_samples * divs / n_appliances).astype(int)
     psr_centers = np.random.uniform(*psr_range, n_appliances)
     decay_centers = np.random.uniform(*decay_range, n_appliances)
 
     X, y = make_periods(n_samples=n_samples,
                         n_appliances=n_appliances,
                         n_modes_per_appliance=n_modes_per_appliance,
+                        cluster_std=cluster_std,
                         output_size=period_size,
+                        ac_range=ac_range,
                         **periods_kwargs)
 
     signatures = []
     labels = []
 
     for k in np.unique(y):
-        mask = y == k
-        Xk = X[mask]
-        n = len(Xk) // divs[k]
-        Xk = Xk.reshape(n, divs[k], -1)
-        Xk = np.repeat(Xk[:, None], n_reps, axis=1)
-        Xk = Xk.reshape(n, -1)
+        Xk = X[y == k]
+        Xk = Xk.reshape(-1, n_cycles_per_signature * period_size)
         Xk = Xk[:, :len(time)]
+        n = len(Xk)
 
-        decay = cluster_std * np.abs(np.random.randn(n, 1))
+        decay = cluster_std * abs(np.random.randn(n, 1))
         decay += decay_centers[k]
         psr = tnormal(a=-1,
                       b=None,
@@ -203,7 +203,7 @@ def make_oscillations(
                       scale=cluster_std,
                       size=(n, 1))
 
-        Xk *= 1 + (psr * np.exp(-decay * time))
+        Xk *= 1 + (psr * np.exp(-decay * time[None]))
 
         signatures.extend(Xk)
         labels.extend([k] * n)
