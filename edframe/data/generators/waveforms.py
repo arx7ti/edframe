@@ -77,7 +77,7 @@ def make_hf_cycles(
         n_modes_per_appliance=1,
         output_size=100,
         h_loc=30,
-        a_loc=None,
+        a_loc=5,
         centers=(-10, 10, 20),
         s_range=(0.5, 2),
         ac_range=(0, 100),
@@ -186,14 +186,13 @@ def make_oscillations(
     decay_centers = np.random.uniform(*decay_range, n_appliances)
 
     Xc, y = make_hf_cycles(n_samples=n_samples,
-                         n_appliances=n_appliances,
-                         n_modes_per_appliance=n_modes_per_appliance,
-                         cluster_std=cluster_std,
-                         output_size=cycle_size,
-                         a_loc=None,
-                         ac_range=ac_range,
-                         n_samples_multiplier=n_cycles_per_signature,
-                         **cycles_kwargs)
+                           n_appliances=n_appliances,
+                           n_modes_per_appliance=n_modes_per_appliance,
+                           cluster_std=cluster_std,
+                           output_size=cycle_size,
+                           ac_range=ac_range,
+                           n_samples_multiplier=n_cycles_per_signature,
+                           **cycles_kwargs)
 
     X = []
 
