@@ -173,6 +173,7 @@ def make_oscillations(
     period_size = round(fs / f0)
     time = np.linspace(0, dt, round(dt * f0 * period_size))
     n_cycles_per_signature = math.ceil(len(time) / period_size)
+    # FIXME not working as expected
     n_samples = n_samples * n_cycles_per_signature
 
     psr_centers = np.random.uniform(*psr_range, n_appliances)
@@ -187,7 +188,6 @@ def make_oscillations(
                         **periods_kwargs)
 
     signatures = []
-    labels = []
 
     for k in np.unique(y):
         Xk = X[y == k]
@@ -205,10 +205,12 @@ def make_oscillations(
 
         Xk *= 1 + (psr * np.exp(-decay * time[None]))
 
-        signatures.extend(Xk)
-        labels.extend([k] * n)
+        signatures.append(Xk)
 
-    return signatures, labels
+    signatures = np.concatenate(signatures)
+    y = y[::n_cycles_per_signature]
+
+    return signatures, y
 
 
 def make_rms_cycle(
