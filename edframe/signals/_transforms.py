@@ -10,7 +10,7 @@ import inspect
 import numpy as np
 
 from ..features import rms, spectral_centroid
-from ..data.generators import make_periods_from
+from ..data.generators import make_hf_cycles_from
 from ._fitps import FITPS
 
 
@@ -168,7 +168,7 @@ def extrapolate2d(x, n, **kwargs):
     sc = AutoReg(sc, 1).fit().predict(n_orig, n_orig + n - 1)
 
     # Generate cycles for extrapolation interval
-    x_extra = make_periods_from(x, n_samples=n)
+    x_extra = make_hf_cycles_from(x, n_samples=n)
     x_extra = x_extra / abs(x_extra).max(1, keepdims=True)
 
     # Compute actual spectral centroid for each cycle on the extrapolation interval

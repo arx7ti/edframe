@@ -43,7 +43,7 @@ def _distribute_samples(n_samples, n_appliances, n_modes_per_appliance):
     return n_spc, class_for_cluster
 
 
-def make_periods_from(X, n_samples=100, reg=1e-12):
+def make_hf_cycles_from(X, n_samples=100, reg=1e-12):
     output_size = X.shape[1]
     X = X / np.abs(X).max(1, keepdims=True)
     Z = np.fft.rfft(X, axis=-1)
@@ -71,13 +71,13 @@ def make_periods_from(X, n_samples=100, reg=1e-12):
     return Xn
 
 
-def make_periods(
+def make_hf_cycles(
         n_samples=100,
         n_appliances=2,
         n_modes_per_appliance=1,
         output_size=100,
         h_loc=30,
-        a_loc=5,
+        a_loc=None,
         centers=(-10, 10, 20),
         s_range=(0.5, 2),
         ac_range=(0, 100),
@@ -105,7 +105,12 @@ def make_periods(
         h = np.random.poisson(h_loc)  # max harmonics
         h = np.clip(h, a_min=2, a_max=output_size // 2)
         ac_coef = np.random.uniform(*ac_range)
-        a = np.random.poisson(a_loc)
+
+        if a_loc is not None:
+            a = np.random.poisson(a_loc)
+        else:
+            a = None
+
         s = np.random.uniform(*s_range)
         m_theta = np.random.uniform(-np.pi, np.pi)
         m_theta = [m_theta] * n
@@ -147,8 +152,9 @@ def make_periods(
         Xk = Xk / np.abs(Xk).max(1, keepdims=True)
 
         # Scale
-        ak = a + cluster_std * np.abs(np.random.randn(n, 1))
-        Xk *= ak
+        if a is not None:
+            ak = a + cluster_std * np.abs(np.random.randn(n, 1))
+            Xk *= ak
 
         # Create labels
         yk = np.ones(n, dtype=int) * app
@@ -170,29 +176,30 @@ def make_oscillations(
         dt=1.0,
         fs=5000,
         f0=50.,
-        **periods_kwargs,
+        **cycles_kwargs,
 ):
-    period_size = round(fs / f0)
-    time = np.linspace(0, dt, round(dt * f0 * period_size))
-    n_cycles_per_signature = math.ceil(len(time) / period_size)
+    cycle_size = round(fs / f0)
+    time = np.linspace(0, dt, round(dt * f0 * cycle_size))
+    n_cycles_per_signature = math.ceil(len(time) / cycle_size)
 
     psr_centers = np.random.uniform(*psr_range, n_appliances)
     decay_centers = np.random.uniform(*decay_range, n_appliances)
 
-    Xc, y = make_periods(n_samples=n_samples,
+    Xc, y = make_hf_cycles(n_samples=n_samples,
                          n_appliances=n_appliances,
                          n_modes_per_appliance=n_modes_per_appliance,
                          cluster_std=cluster_std,
-                         output_size=period_size,
+                         output_size=cycle_size,
+                         a_loc=None,
                          ac_range=ac_range,
                          n_samples_multiplier=n_cycles_per_signature,
-                         **periods_kwargs)
+                         **cycles_kwargs)
 
     X = []
 
     for k in np.unique(y):
         Xk = Xc[y == k]
-        Xk = Xk.reshape(-1, n_cycles_per_signature * period_size)
+        Xk = Xk.reshape(-1, n_cycles_per_signature * cycle_size)
         n = len(Xk)
 
         decay = cluster_std * abs(np.random.randn(n, 1))
