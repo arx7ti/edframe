@@ -377,16 +377,18 @@ class VI(Gen):
                         locs=locs)
 
     def pad(self, n, **kwargs):
-        if not self.is_aligned():
-            raise NotImplementedError
-
         if self.n_components > 1:
             raise NotImplementedError
 
-        v, i = self.data.reshape(2, *self._get_dims())
-        is_aligned = self.is_aligned() if n % v.shape[1] == 0 else False
-        # FIXME
-        v = extrapolate(v, n, **kwargs)
+        if self.is_aligned():
+            dims = self._get_dims()
+            v, i = self.data.reshape(2, *dims)
+            is_aligned = n % dims[1] == 0
+        else:
+            v, i = self.data
+            is_aligned = False
+
+        _, v = extrapolate(v, n, v=v, **kwargs)
         i = pad(i.ravel(), n, **kwargs)
 
         return self.new(v,
