@@ -58,6 +58,7 @@ def make_hf_cycles_from(X, n_samples=100, reg=1e-12):
     ma = a.mean()
     sa = a.std()
 
+    # Generate time-correlated random variables
     Z0 = np.mean(Z, 0)
     Zn = Z - Z0
     r, theta = np.abs(Zn)[:, 1], np.angle(Zn)[:, 1]
@@ -65,7 +66,7 @@ def make_hf_cycles_from(X, n_samples=100, reg=1e-12):
 
     ar = AutoReg(r, 1).fit(cov_kwds={'use_correction': True})
     corr_coef = ar.params[1]
-    cluster_std = np.sqrt(ar.sigma2 / (1 - 2 / np.pi))
+    cluster_std = np.sqrt(ar.sigma2)
     h = Z.shape[1]
 
     r = correlated_normal((n_samples, h), cluster_std, r=corr_coef, epsn=r[-1])
@@ -77,12 +78,12 @@ def make_hf_cycles_from(X, n_samples=100, reg=1e-12):
     theta = np.fmod(abs(theta), 2 * np.pi)
 
     # Random variables
-    real = Z0.real[None] + r * np.cos(theta)
-    imag = Z0.imag[None] + r * np.sin(theta)
+    real = r * np.cos(theta)
+    imag = r * np.sin(theta)
     Zn = real + 1j * imag
 
     # Synthetic periods based on statistics
-    Zn = m + Zn @ L.T 
+    Zn = m + Zn @ L.T
     Xn = np.fft.irfft(Zn, output_size, axis=1)
     Xn = Xn / np.abs(Xn).max(1, keepdims=True)
     an = ma + sa * np.abs(np.random.randn(n_samples, 1))
