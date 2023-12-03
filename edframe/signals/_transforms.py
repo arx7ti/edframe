@@ -161,27 +161,15 @@ def replicate(
 def extrapolate2d(x, n, **kwargs):
     assert len(x.shape) == 2
 
-    # Estimate spectral centroid for each cycle on the extrapolation interval
     n_orig, n_samples = x.shape
-    # sc = spectral_centroid(x, True)
-    sc = x.std(1)
-    sc = AutoReg(sc, 1).fit().predict(n_orig, n_orig + n - 1)
 
     # Generate cycles for extrapolation interval
     x_extra = make_hf_cycles_from(x, n_samples=n)
     x_extra = x_extra / abs(x_extra).max(1, keepdims=True)
 
-    # Compute actual spectral centroid for each cycle on the extrapolation interval
-    # sc_extra = spectral_centroid(x_extra, True)
-    sc_extra = x_extra.std(1) 
-
-    # Order the generated samples with respect to the estimated spectral centroids
-    # FIXME extrapolate and apply time-correlation
-    # order = _align_variation(sc, sc_extra)
-    # x_extra = x_extra[order]
-
     # Estimate amplitude envelope on the extrapolation interval
-    # FIXME data centering
+    x0 = x.mean(-1, keepdims=True)
+    x = x - x0
     a = abs(x).max(1)
     t = np.linspace(0, 1, n_orig)
     kind = kwargs.get('kind', 'linear')
@@ -196,7 +184,7 @@ def extrapolate2d(x, n, **kwargs):
     x_extra = a_extra * x_extra
 
     # Combine original and extrapolated signals
-    x = np.concatenate((x, x_extra))
+    x = np.concatenate((x + x0, x_extra))
 
     return x
 
