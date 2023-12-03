@@ -8,6 +8,7 @@ from scipy.stats import lognorm
 from scipy.signal import impulse
 from scipy.linalg import toeplitz
 from datetime import datetime, timedelta
+from statsmodels.tsa.ar_model import AutoReg
 
 # Internal packages
 from ...utils.random import tnormal, gaussian_mixture
@@ -57,8 +58,27 @@ def make_hf_cycles_from(X, n_samples=100, reg=1e-12):
     ma = a.mean()
     sa = a.std()
 
+    Z0 = np.mean(Z, 0)
+    Zn = Z - Z0
+    r, theta = np.abs(Zn)[:, 1], np.angle(Zn)[:, 1]
+    theta[theta < 0] += 2 * np.pi
+
+    ar = AutoReg(r, 1).fit(cov_kwds={'use_correction': True})
+    corr_coef = ar.params[1]
+    cluster_std = np.sqrt(ar.sigma2 / (1 - 2 / np.pi))
+    h = Z.shape[1]
+
+    r = correlated_normal((n_samples, h), cluster_std, r=corr_coef, epsn=r[-1])
+    r = abs(r)
+    theta = correlated_normal((n_samples, h),
+                              cluster_std,
+                              r=corr_coef,
+                              epsn=theta[-1])
+    theta = np.fmod(abs(theta), 2 * np.pi)
+
     # Random variables
-    real, imag = np.random.randn(2, n_samples, len(L))
+    real = Z0.real[None] + r * np.cos(theta)
+    imag = Z0.imag[None] + r * np.sin(theta)
     Zn = real + 1j * imag
 
     # Synthetic periods based on statistics
@@ -71,6 +91,35 @@ def make_hf_cycles_from(X, n_samples=100, reg=1e-12):
     return Xn
 
 
+def correlated_normal(shape, std=1, r=0.5, epsn=None):
+    # TODO axis
+    if isinstance(shape, int):
+        shape = (shape, )
+
+    if isinstance(shape, tuple):
+        nc, *n = shape
+    else:
+        raise ValueError
+
+    if epsn is None:
+        eps0 = np.random.normal(0, std, size=n)
+    else:
+        nc += 1
+        eps0 = epsn
+
+    x = np.zeros((nc, *n))
+    x[0] = eps0
+
+    for t in range(1, nc):
+        eps = np.random.normal(0, std, size=n)
+        x[t] = r * x[t - 1] + eps
+
+    if epsn is not None:
+        x = x[1:]
+
+    return x
+
+
 def make_hf_cycles(
         n_samples=100,
         n_appliances=2,
@@ -80,12 +129,14 @@ def make_hf_cycles(
         a_loc=5,
         centers=(-10, 10, 20),
         s_range=(0.5, 2),
-        ac_range=(0, 100),
+        corr_range=(-0.99, 0.99),
         z0_range=(0, 1e-1),
         cluster_std=1,
         noise_std=1e-4,
         **kwargs,
 ):
+    assert corr_range[0] > -1 and corr_range[0] < 1
+    assert corr_range[1] > -1 and corr_range[1] < 1
     assert h_loc > 1 and h_loc <= output_size // 2
     # assert n_samples >= n_modes_per_appliance # FIXME array support
 
@@ -104,7 +155,7 @@ def make_hf_cycles(
         app = app4mode[m]
         h = np.random.poisson(h_loc)  # max harmonics
         h = np.clip(h, a_min=2, a_max=output_size // 2)
-        ac_coef = np.random.uniform(*ac_range)
+        corr_coef = np.random.uniform(*corr_range)
 
         if a_loc is not None:
             a = np.random.poisson(a_loc)
@@ -112,21 +163,16 @@ def make_hf_cycles(
             a = None
 
         s = np.random.uniform(*s_range)
-        m_theta = np.random.uniform(-np.pi, np.pi)
-        m_theta = [m_theta] * n
-        m_r = np.zeros(n)
+        theta0 = np.random.uniform(0, 2 * np.pi, size=(1, h + 1))
 
-        # Toeplitz matrix for time-correlation
-        ac = np.exp(-np.linspace(0, 1, n) / (ac_coef + eps))
-        # TODO check `cluster_std *`
-        tpl = cluster_std * toeplitz(ac)
+        # Generate time-correlated random variables
+        r = correlated_normal((n, h + 1), cluster_std, r=corr_coef)
+        theta = correlated_normal((n, h + 1), cluster_std, r=corr_coef)
+        r = abs(r)
+        theta = np.fmod(abs(theta + theta0), 2 * np.pi)
 
-        # Basis for time-correlated random variables
-        theta = np.random.multivariate_normal(m_theta, tpl, size=h + 1).T
-        r = np.abs(np.random.multivariate_normal(m_r, tpl, size=h + 1)).T
+        # Vertices of classes
         r_max = r.max(0, keepdims=True)
-
-        # Vertices of appliances
         re = np.random.uniform(re0, re1, (1, h + 1))
         im = np.random.uniform(-r_max - imw, -r_max, (1, h + 1))
         z0 = np.random.uniform(*z0_range)
@@ -140,11 +186,15 @@ def make_hf_cycles(
         # Physics-informed model
         Z[:, 0].real = z0
         Z[:, 0].imag = 0
+
         L = lognorm.pdf(x=np.arange(h + 1), scale=cluster_std, s=s)
         L /= np.max(L)
         Z *= L
+
         Z[:, 2:] *= np.fmod(np.arange(h - 1) + dropout_shift, 2)
+
         Z += noise_std * np.random.randn(n, h + 1)
+
         assert np.all(Z.imag <= 0)
 
         # Transform signals into time-domain
@@ -170,7 +220,8 @@ def make_oscillations(
         n_appliances=1,
         n_modes_per_appliance=1,
         cluster_std=1,
-        ac_range=(0, 100),
+        corr_range=(-0.99, 0.99),
+        a_loc=5,
         psr_range=(1, 5),
         decay_range=(5, 50),
         dt=1.0,
@@ -190,13 +241,19 @@ def make_oscillations(
                            n_modes_per_appliance=n_modes_per_appliance,
                            cluster_std=cluster_std,
                            output_size=cycle_size,
-                           ac_range=ac_range,
+                           corr_range=corr_range,
+                           a_loc=None,
                            n_samples_multiplier=n_cycles_per_signature,
                            **cycles_kwargs)
 
     X = []
 
     for k in np.unique(y):
+        if a_loc is not None:
+            a = np.random.poisson(a_loc)
+        else:
+            a = None
+
         Xk = Xc[y == k]
         Xk = Xk.reshape(-1, n_cycles_per_signature * cycle_size)
         n = len(Xk)
@@ -208,6 +265,11 @@ def make_oscillations(
                       loc=psr_centers[k],
                       scale=cluster_std,
                       size=(n, 1))
+
+        # Scale
+        if a is not None:
+            ak = a + cluster_std * np.abs(np.random.randn(n, 1))
+            Xk *= ak
 
         Xk *= 1 + (psr * np.exp(-decay * time[None]))
 
