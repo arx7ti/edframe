@@ -82,7 +82,7 @@ def make_hf_cycles_from(X, n_samples=100, reg=1e-12):
     Zn = real + 1j * imag
 
     # Synthetic periods based on statistics
-    Zn = m + np.dot(Zn, L.T)
+    Zn = m + Zn @ L.T 
     Xn = np.fft.irfft(Zn, output_size, axis=1)
     Xn = Xn / np.abs(Xn).max(1, keepdims=True)
     an = ma + sa * np.abs(np.random.randn(n_samples, 1))
