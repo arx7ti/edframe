@@ -37,10 +37,13 @@ def rms(x, axis=-1, keepdims=False):
 def zero_crossing_rate(x, mode='median'):
     x0 = zero_crossings(x)
 
+    if len(x0) <= 1:
+        raise ValueError
+
     if mode == 'mean':
-        x0_rate = 2 * np.diff(x0).mean()
+        x0_rate = np.diff(x0).mean()
     elif mode == 'median':
-        x0_rate = 2 * np.median(np.diff(x0))
+        x0_rate = np.median(np.diff(x0))
     else:
         raise ValueError
 
@@ -48,7 +51,7 @@ def zero_crossing_rate(x, mode='median'):
 
 
 def fundamental(x, fs, mode='median'):
-    x0_rate = zero_crossing_rate(x, mode=mode)
+    x0_rate = 2 * zero_crossing_rate(x, mode=mode)
     f0 = fs / x0_rate
 
     return f0
