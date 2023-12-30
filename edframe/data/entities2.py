@@ -522,7 +522,7 @@ class VISet:
 
     @property
     def n_appliances(self):
-        raise NotImplementedError
+        return len(self.appliances)
 
     @property
     def n_signatures(self):
@@ -542,11 +542,20 @@ class VISet:
         return data
 
     @property
-    def targets(self):
+    def labels(self):
         labels = [vi.labels for vi in self._data]
+
+        return labels
+
+    @property
+    def appliances(self):
+        return list(set(list(it.chain(*self.labels))))
+
+    @property
+    def targets(self):
         mlb = MultiLabelBinarizer()
 
-        return mlb.fit_transform(labels)
+        return mlb.fit_transform(self.labels)
 
     @classmethod
     def new(cls, *args, **kwargs):
