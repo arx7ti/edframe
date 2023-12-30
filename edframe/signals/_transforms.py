@@ -14,29 +14,6 @@ from ..data.generators import make_hf_cycles_from
 from ._fitps import FITPS
 
 
-def _align_variation(v1, v2):
-    order = []
-
-    for k in range(len(v1)):
-        tmp = []
-
-        for j in range(len(v2)):
-            d = abs(v1[k] - v2[j])
-            tmp.append((d, j))
-
-        tmp = list(sorted(tmp, key=lambda x: x[0]))
-        tmp = [x for _, x in tmp]
-
-        for j in tmp:
-            if j not in order:
-                order.append(j)
-                break
-
-    order = np.asarray(order)
-
-    return order
-
-
 def identity(x: np.ndarray):
     return x
 
@@ -193,9 +170,11 @@ def extrapolate(x, n, v=None, **kwargs):
     # FIXME if only one signal and non-aligned
     is_aligned = len(x.shape) == 2
 
-    if not is_aligned and v is None:
-        raise ValueError
-    elif not is_aligned:
+    # if not is_aligned and v is None:
+    #     z = np.fft.rfft(x, axis=)
+    #     v =
+
+    if not is_aligned:
         n_orig = len(x)
 
         # Obtain synchronized signal with equal number of samples per cycle
