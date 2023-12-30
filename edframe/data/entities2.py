@@ -681,6 +681,12 @@ class VISet:
 
         return self.new(samples)
 
+    def random(self, random_state=None):
+        rng = np.random.RandomState(random_state)
+        idx = rng.randint(len(self))
+
+        return self._data[idx]
+
     def to(self):
         raise NotImplementedError
 
