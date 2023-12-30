@@ -653,9 +653,6 @@ class VISet:
         raise NotImplementedError
 
     def split(self, test_size=0.3, by_samples=True, random_state=None):
-        if random_state is not None:
-            np.random.seed(random_state)
-
         if self.targets is not None:
             stratify = self.targets.sum(1)
         else:
@@ -663,7 +660,8 @@ class VISet:
 
         train_idxs, test_idxs = train_test_split(range(len(self)),
                                                  test_size=test_size,
-                                                 stratify=stratify)
+                                                 stratify=stratify,
+                                                 random_state=random_state)
         train_samples = [self._data[i] for i in train_idxs]
         test_samples = [self._data[i] for i in test_idxs]
 
@@ -677,7 +675,11 @@ class VISet:
         return train_set, test_set
 
     def shuffle(self, random_state=None):
-        raise NotImplementedError
+        rng = np.random.RandomState(random_state)
+        ordr = rng.choice(len(self), len(self), replace=False)
+        samples = [self._data[i] for i in ordr]
+
+        return self.new(samples)
 
     def to(self):
         raise NotImplementedError
