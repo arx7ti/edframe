@@ -9,6 +9,7 @@ from numbers import Number
 from inspect import isfunction
 from collections import defaultdict
 from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import MultiLabelBinarizer
 
 from .decorators import feature
 from ..features import fundamental, spectrum, thd
@@ -32,7 +33,7 @@ class Gen:
         return cls(*args, **kwargs)
 
     def __init__(self, data, fs, y=None, locs=None) -> None:
-        if isinstance(y, str):
+        if not hasattr(y, '__len__'):
             y = [y]
 
         if y is not None and locs is not None:
@@ -542,8 +543,10 @@ class VISet:
 
     @property
     def targets(self):
-        return None
-        # raise NotImplementedError
+        labels = [vi.labels for vi in self._data]
+        mlb = MultiLabelBinarizer()
+
+        return mlb.fit_transform(labels)
 
     @classmethod
     def new(cls, *args, **kwargs):
