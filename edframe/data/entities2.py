@@ -7,6 +7,7 @@ import pandas as pd
 import itertools as it
 from numbers import Number
 from inspect import isfunction
+from collections import defaultdict
 
 from .decorators import feature
 from ..features import fundamental, spectrum, thd
@@ -464,6 +465,7 @@ class VI(Gen):
 
             if isinstance(value, Number):
                 data.append(value)
+                f_reps.update({feature: 0})
             elif hasattr(value, '__len__'):
                 data.extend(value)
                 f_reps.update({feature: len(value)})
@@ -471,8 +473,10 @@ class VI(Gen):
                 raise ValueError
 
         keys = lambda: list(
-            it.chain(*[[f'{k}_{i}' for i in range(1, n + 1)]
-                       for k, n in f_reps.items()]))
+            it.chain(*[[
+                f'{k}_{i}' if n > 0 else f'{k}'
+                for i in range(1, n + 1 if n > 0 else 2)
+            ] for k, n in f_reps.items()]))
 
         if format == 'numpy':
             data = np.asarray(data)
@@ -560,7 +564,7 @@ class VISet:
 
         data = []
 
-        for vj, ij, yj, locsj in zip(data, y, locs):
+        for vj, ij, yj, locsj in zip(v, i, y, locs):
             vi = VI(v=vj, i=ij, fs=fs, y=yj, locs=locsj)
             data.append(vi)
 
@@ -569,13 +573,14 @@ class VISet:
     def __init__(self, samples: list[VI], **kwargs):
         ls = [len(vi) for vi in samples]
         fs = [vi.fs for vi in samples]
-        f0 = [vi.f0 for vi in samples]
+        # TODO if f0 is undefined
+        # f0 = [vi.f0() for vi in samples]
 
         if not all([fs[0] == f for f in fs[1:]]):
             raise ValueError
 
-        if not all([f0[0] == f for f in f0[1:]]):
-            raise ValueError
+        # if not all([f0[0] == f for f in f0[1:]]):
+        #     raise ValueError
 
         l_mode = kwargs.get('len_mode', 'median')
 
@@ -606,8 +611,31 @@ class VISet:
     def __len__(self):
         return len(self._data)
 
-    def features(self):
-        raise NotImplementedError
+    def features(self, features, format='list', **kwargs):
+        X = []
+
+        for vi in self._data:
+            x = vi.features(features, format=format, **kwargs)
+            X.append(x)
+
+        if format == 'numpy':
+            X = np.stack(X)
+        elif format == 'pandas':
+            X = pd.concat(X, axis=0, ignore_index=True)
+        elif format == 'dict':
+            X_dict = defaultdict(list)
+
+            while len(X) > 0:
+                x = X.pop(0)
+
+                for k, v in x.items():
+                    X_dict[k].append(v)
+
+            X = X_dict
+        elif format != 'list':
+            raise ValueError
+
+        return X
 
     def targets(self):
         raise NotImplementedError
