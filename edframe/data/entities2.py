@@ -8,6 +8,7 @@ import itertools as it
 from numbers import Number
 from inspect import isfunction
 from collections import defaultdict
+from sklearn.model_selection import train_test_split
 
 from .decorators import feature
 from ..features import fundamental, spectrum, thd
@@ -539,6 +540,15 @@ class VISet:
         data = np.asarray(data).transpose(1, 0, 2)
         return data
 
+    @property
+    def targets(self):
+        return None
+        # raise NotImplementedError
+
+    @classmethod
+    def new(cls, *args, **kwargs):
+        return cls(*args, **kwargs)
+
     @classmethod
     def from_array(
         cls,
@@ -570,7 +580,7 @@ class VISet:
 
         return cls(data, **kwargs)
 
-    def __init__(self, samples: list[VI], **kwargs):
+    def __init__(self, samples: list[VI], adjust_len_by='median'):
         ls = [len(vi) for vi in samples]
         fs = [vi.fs for vi in samples]
         # TODO if f0 is undefined
@@ -582,11 +592,9 @@ class VISet:
         # if not all([f0[0] == f for f in f0[1:]]):
         #     raise ValueError
 
-        l_mode = kwargs.get('len_mode', 'median')
-
-        if l_mode == 'median':
+        if adjust_len_by == 'median':
             lsm = np.median(ls)
-        elif l_mode == 'mean':
+        elif adjust_len_by == 'mean':
             lsm = np.mean(ls)
         else:
             raise ValueError
@@ -600,7 +608,7 @@ class VISet:
             # TODO if not aligned
             if dn > 0:
                 vi = vi.extrapolate(dn)
-            else:
+            elif dn < 0:
                 vi = vi[:lsm]
 
             new_samples.append(vi)
@@ -638,14 +646,32 @@ class VISet:
 
         return X
 
-    def targets(self):
-        raise NotImplementedError
-
     def stats(self):
         raise NotImplementedError
 
-    def split(self):
-        raise NotImplementedError
+    def split(self, test_size=0.3, by_samples=True, random_state=None):
+        if random_state is not None:
+            np.random.seed(random_state)
+
+        if self.targets is not None:
+            stratify = self.targets.sum(1)
+        else:
+            stratify = None
+
+        train_idxs, test_idxs = train_test_split(range(len(self)),
+                                                 test_size=test_size,
+                                                 stratify=stratify)
+        train_samples = [self._data[i] for i in train_idxs]
+        test_samples = [self._data[i] for i in test_idxs]
+
+        if by_samples:
+            train_set = self.new(train_samples)
+            test_set = self.new(test_samples)
+        else:
+            # TODO by appliance type
+            pass
+
+        return train_set, test_set
 
     def shuffle(self, random_state=None):
         raise NotImplementedError
