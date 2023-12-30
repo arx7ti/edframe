@@ -72,10 +72,12 @@ class VI(Gen):
         return self.v * self.i
 
     @property
+    # TODO rename
     def __v(self):
         return self.data[0]
 
     @property
+    # TODO rename
     def __i(self):
         return self.data[1]
 
@@ -408,6 +410,11 @@ class VI(Gen):
                         is_aligned=self.is_aligned(),
                         dims=self._dims)
 
+    def steady_state(self):
+        # vm = np.median(abs(self.v))
+        # im = np.median(abs(self.i))
+        raise NotImplementedError
+
     def fryze(self):
         # TODO component-wise
         i_a, i_r = fryze(*self.data)
@@ -513,7 +520,7 @@ class VISet:
 
     @property
     def n_signatures(self):
-        raise NotImplementedError
+        return len(self)
 
     @property
     def size(self):
@@ -521,48 +528,48 @@ class VISet:
 
     @property
     def data(self):
-        raise NotImplementedError
+        data = []
+        for vi in self._data:
+            data.append(vi.data)
 
-    def __init__(self, data, **kwargs) -> None:
-        if isinstance(data, np.ndarray):
-            fs = kwargs.get('fs', None)
-            y = kwargs.get('y', None)
-            locs = kwargs.get('locs', None)
-            v, i = data
+        data = np.asarray(data).transpose(1, 0, 2)
+        return data
 
-            if fs is None:
-                raise ValueError
-
-            data = self._array_to_vi(v, i, fs, y=y, locs=locs)
-
-        self._build(data, **kwargs)
-
-    def _array_to_vi(self, v, i, fs, y=None, locs=None):
-        if len(v.shape) != 2:
-            raise ValueError
-        elif len(i.shape) != 2:
-            raise ValueError
-
-        data = data.transpose(1, 0, 2)
+    @classmethod
+    def from_array(
+        cls,
+        v: np.ndarray,
+        i: np.ndarray,
+        fs,
+        y=None,
+        locs=None,
+        **kwargs,
+    ):
+        assert v.shape == i.shape
+        assert len(v.shape) == len(i.shape) == 2
 
         if y is None:
-            y = [None] * data.shape[1]
+            y = [None] * len(v)
+        else:
+            assert len(y) == len(v)
+            assert len(y.shape) == 1 or (len(y.shape) == 2
+                                         and np.product(y.shape) == len(v))
 
         if locs is None:
-            locs = [None] * data.shape[1]
+            locs = [None] * len(v)
 
-        new_data = []
+        data = []
 
         for vj, ij, yj, locsj in zip(data, y, locs):
             vi = VI(v=vj, i=ij, fs=fs, y=yj, locs=locsj)
-            new_data.append(vi)
+            data.append(vi)
 
-        return new_data
+        return cls(data, **kwargs)
 
-    def _build(self, data, **kwargs):
-        ls = [len(vi) for vi in data]
-        fs = [vi.fs for vi in data]
-        f0 = [vi.f0 for vi in data]
+    def __init__(self, samples: list[VI], **kwargs):
+        ls = [len(vi) for vi in samples]
+        fs = [vi.fs for vi in samples]
+        f0 = [vi.f0 for vi in samples]
 
         if not all([fs[0] == f for f in fs[1:]]):
             raise ValueError
@@ -580,9 +587,9 @@ class VISet:
             raise ValueError
 
         lsm = int(round(lsm))
-        new_data = []
+        new_samples = []
 
-        for vi in data:
+        for vi in samples:
             dn = lsm - len(vi)
 
             # TODO if not aligned
@@ -591,10 +598,13 @@ class VISet:
             else:
                 vi = vi[:lsm]
 
-            new_data.append(vi)
+            new_samples.append(vi)
 
-        self._data = new_data
+        self._data = new_samples
         self._fs = vi.fs
+
+    def __len__(self):
+        return len(self._data)
 
     def features(self):
         raise NotImplementedError
