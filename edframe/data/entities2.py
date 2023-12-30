@@ -631,6 +631,7 @@ class VISet:
                 for k, v in x.items():
                     X_dict[k].append(v)
 
+            X_dict = dict(X_dict)
             X = X_dict
         elif format != 'list':
             raise ValueError
