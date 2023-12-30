@@ -491,8 +491,10 @@ class VI(Gen):
 
         return data
 
-    def hash(self):
-        raise NotImplementedError
+    def hash(self, **kwargs):
+        k = kwargs.get('k', 1e12)
+
+        return int(round(np.sum(abs(self.s)) * k))
 
     def todict(self):
         data = {'v': self.v, 'i': self.i}
@@ -699,5 +701,8 @@ class VISet:
     def to(self):
         raise NotImplementedError
 
-    def hash(self):
-        raise NotImplementedError
+    def hash(self, **kwargs):
+        k = kwargs.get('k', 1e12)
+        hashes = [vi.hash(k=k) for vi in self._data]
+
+        return sum(hashes)
