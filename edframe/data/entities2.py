@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import os
 import math
 import random
+import platform
 import numpy as np
 import pandas as pd
 import itertools as it
@@ -10,8 +12,11 @@ from inspect import isfunction
 from collections import defaultdict
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import MultiLabelBinarizer
+import pickle
 
+from datetime import datetime
 from .decorators import feature
+from pickle import HIGHEST_PROTOCOL
 from ..features import fundamental, spectrum, thd
 from ..signals.exceptions import NotEnoughPeriods
 from ..signals import FITPS, downsample, upsample, roll, fryze, extrapolate, pad
@@ -539,6 +544,7 @@ class VISet:
             data.append(vi.data)
 
         data = np.asarray(data).transpose(1, 0, 2)
+
         return data
 
     @property
@@ -548,7 +554,7 @@ class VISet:
         return labels
 
     @property
-    def appliances(self):
+    def appliance_types(self):
         return list(set(list(it.chain(*self.labels))))
 
     @property
@@ -631,6 +637,39 @@ class VISet:
     def __len__(self):
         return len(self._data)
 
+    def __getitem__(self, indexer):
+        # TODO everywhere: if len == 1 then just item
+        # TODO boolean mask
+        if hasattr(indexer, '__len__'):
+            assert len(indexer) > 0
+            dtype = type(indexer[0])
+
+            if isinstance(indexer, np.ndarray):
+                assert len(indexer.shape) == 1
+
+            if dtype == str:
+                if not self.is_standalone():
+                    raise ValueError
+
+                data = [x for x in self.data if x.label in indexer]
+            else:
+                data = [self.data[i] for i in indexer]
+        elif isinstance(indexer, str):
+            data = [x for x in self.data if x.label == indexer]
+        elif isinstance(indexer, int | slice):
+            # FIXME any int-like object
+            data = self.data[indexer]
+        else:
+            raise ValueError
+
+        if hasattr(data, '__len__'):
+            return self.new(data)
+
+        return data
+
+    def appliances():
+        pass
+
     def features(self, features, format='list', **kwargs):
         X = []
 
@@ -667,14 +706,13 @@ class VISet:
         else:
             stratify = None
 
-        train_idxs, test_idxs = train_test_split(range(len(self)),
-                                                 test_size=test_size,
-                                                 stratify=stratify,
-                                                 random_state=random_state)
-        train_samples = [self._data[i] for i in train_idxs]
-        test_samples = [self._data[i] for i in test_idxs]
-
         if by_samples:
+            train_idxs, test_idxs = train_test_split(range(len(self)),
+                                                     test_size=test_size,
+                                                     stratify=stratify,
+                                                     random_state=random_state)
+            train_samples = [self._data[i] for i in train_idxs]
+            test_samples = [self._data[i] for i in test_idxs]
             train_set = self.new(train_samples)
             test_set = self.new(test_samples)
         else:
@@ -701,3 +739,26 @@ class VISet:
 
     def hash(self):
         return hash(self.data.tobytes()) & 0xFFFFFFFFFFFFFFFF
+
+    def save(self, filepath=None, make_dirs=False):
+        if filepath is None:
+            today = datetime.now().date()
+            filename = f'VIset-{today}-H{self.hash()}.pkl'
+            filepath = os.path.join(os.getcwd(), filename)
+        elif make_dirs:
+            dirpath = os.path.dirname(filepath)
+            os.makedirs(dirpath, exist_ok=True)
+
+        data = {'samples': self._data}
+
+        with open(filepath, 'wb') as fb:
+            pickle.dump(data, fb, protocol=HIGHEST_PROTOCOL)
+
+    @classmethod
+    def load(cls, filepath):
+        with open(filepath, 'rb') as fb:
+            data = pickle.load(fb)
+
+        samples = data['samples']
+
+        return cls(samples)
