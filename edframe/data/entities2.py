@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import os
 import math
+import pickle
 import random
-import platform
 import numpy as np
 import pandas as pd
 import itertools as it
@@ -12,7 +12,6 @@ from inspect import isfunction
 from collections import defaultdict
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import MultiLabelBinarizer
-import pickle
 
 from datetime import datetime
 from .decorators import feature
@@ -566,28 +565,26 @@ class VISet(DataSet, BackupMixin):
     @property
     def data(self):
         data = []
-        for vi in self._data:
+        for vi in self.signatures:
             data.append(vi.data)
 
         data = np.asarray(data).transpose(1, 0, 2)
 
         return data
 
-    @property
-    def labels(self):
-        labels = [vi.labels for vi in self._data]
+    # @property
+    # def labels(self):
+    #     labels = [vi.labels for vi in self.signatures]
 
-        return labels
+    #     return labels
 
     @property
     def appliance_types(self):
         return list(set(list(it.chain(*self.labels))))
 
-    @property
-    def targets(self):
-        mlb = MultiLabelBinarizer()
-
-        return mlb.fit_transform(self.labels)
+    # @property
+    # def targets(self):
+    #     return self._targets
 
     @classmethod
     def new(cls, *args, **kwargs):
@@ -624,11 +621,11 @@ class VISet(DataSet, BackupMixin):
 
         return cls(data, **kwargs)
 
-    def __init__(self, samples: list[VI], adjust_len_by='median'):
-        ls = [len(vi) for vi in samples]
-        fs = [vi.fs for vi in samples]
+    def __init__(self, signatures: list[VI], adjust_len_by='median'):
+        ls = [len(vi) for vi in signatures]
+        fs = [vi.fs for vi in signatures]
         # TODO if f0 is undefined
-        # f0 = [vi.f0() for vi in samples]
+        # f0 = [vi.f0() for vi in signatures]
 
         if not all([fs[0] == f for f in fs[1:]]):
             raise ValueError
@@ -644,9 +641,9 @@ class VISet(DataSet, BackupMixin):
             raise ValueError
 
         lsm = int(round(lsm))
-        new_samples = []
+        new_signatures = []
 
-        for vi in samples:
+        for vi in signatures:
             dn = lsm - len(vi)
 
             # TODO if not aligned
@@ -655,51 +652,70 @@ class VISet(DataSet, BackupMixin):
             elif dn < 0:
                 vi = vi[:lsm]
 
-            new_samples.append(vi)
+            new_signatures.append(vi)
 
-        self._data = new_samples
+        self.signatures = new_signatures
+        # TODO if signature was updated
+        self.labels = [vi.labels for vi in self.signatures]
+        self._mlb = MultiLabelBinarizer()
+        self.targets = self._mlb.fit_transform(self.labels)
         self._fs = vi.fs
 
     def __len__(self):
-        return len(self._data)
+        return len(self.signatures)
 
     def __getitem__(self, indexer):
-        # TODO everywhere: if len == 1 then just item
-        # TODO boolean mask
-        if hasattr(indexer, '__len__'):
-            assert len(indexer) > 0
-            dtype = type(indexer[0])
+        just_signature = False
 
-            if isinstance(indexer, np.ndarray):
-                assert len(indexer.shape) == 1
+        if isinstance(indexer, slice):
+            a = 0 if indexer.start is None else indexer.start
+            b = len(self) if indexer.stop is None else indexer.stop
+            indexer = list(range(a, b))
+        elif isinstance(indexer, int):
+            indexer = [indexer]
+            just_signature = True
 
-            if dtype == str:
-                if not self.is_standalone():
-                    raise ValueError
+        indexer = np.asarray(indexer)
+        assert len(indexer.shape) == 1
 
-                data = [x for x in self.data if x.label in indexer]
-            else:
-                data = [self.data[i] for i in indexer]
-        elif isinstance(indexer, str):
-            data = [x for x in self.data if x.label == indexer]
-        elif isinstance(indexer, int | slice):
-            # FIXME any int-like object
-            data = self.data[indexer]
+        if indexer.dtype == bool:
+            assert len(indexer) == len(self)
+            indexer = np.argwhere(indexer).ravel()
+
+        signatures = [self.signatures[i] for i in indexer]
+
+        if len(signatures) == 0:
+            return None
+
+        if just_signature:
+            return signatures[0]
+
+        return self.new(signatures)
+
+    def appliances(self, names, exact_match=False):
+        if not hasattr(names, '__len__'):
+            names = [names]
+
+        query = self._mlb.transform([names])
+
+        if exact_match:
+            mask = (self.targets == query).all(1)
         else:
-            raise ValueError
+            mask = (self.targets * query).sum(1) == len(names)
 
-        if hasattr(data, '__len__'):
-            return self.new(data)
+        ids = np.argwhere(mask).ravel()
 
-        return data
+        if len(ids) == 0:
+            return None
 
-    def appliances():
-        pass
+        signatures = [self.signatures[i] for i in ids]
+
+        return self.new(signatures)
 
     def features(self, features, format='list', **kwargs):
         X = []
 
-        for vi in self._data:
+        for vi in self.signatures:
             x = vi.features(features, format=format, **kwargs)
             X.append(x)
 
@@ -737,8 +753,8 @@ class VISet(DataSet, BackupMixin):
                                                      test_size=test_size,
                                                      stratify=stratify,
                                                      random_state=random_state)
-            train_samples = [self._data[i] for i in train_idxs]
-            test_samples = [self._data[i] for i in test_idxs]
+            train_samples = [self.signatures[i] for i in train_idxs]
+            test_samples = [self.signatures[i] for i in test_idxs]
             train_set = self.new(train_samples)
             test_set = self.new(test_samples)
         else:
@@ -750,7 +766,7 @@ class VISet(DataSet, BackupMixin):
     def shuffle(self, random_state=None):
         rng = np.random.RandomState(random_state)
         ordr = rng.choice(len(self), len(self), replace=False)
-        samples = [self._data[i] for i in ordr]
+        samples = [self.signatures[i] for i in ordr]
 
         return self.new(samples)
 
@@ -758,7 +774,7 @@ class VISet(DataSet, BackupMixin):
         rng = np.random.RandomState(random_state)
         idx = rng.randint(len(self))
 
-        return self._data[idx]
+        return self.signatures[idx]
 
     def to(self):
         raise NotImplementedError
