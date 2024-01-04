@@ -51,11 +51,33 @@ class Gen:
         self._require_components = True
 
 
+class BackupMixin:
+
+    def save(self, filepath=None, make_dirs=False):
+        if filepath is None:
+            today = datetime.now().date()
+            filename = f'{self.__class__.__name__}-{today}-H{self.hash()}.pkl'
+            filepath = os.path.join(os.getcwd(), filename)
+        elif make_dirs:
+            dirpath = os.path.dirname(filepath)
+            os.makedirs(dirpath, exist_ok=True)
+
+        with open(filepath, 'wb') as fb:
+            pickle.dump(self, fb, protocol=HIGHEST_PROTOCOL)
+
+    @classmethod
+    def load(cls, filepath):
+        with open(filepath, 'rb') as fb:
+            instance = pickle.load(fb)
+
+        return instance
+
+
 class L(Gen):
     pass
 
 
-class VI(Gen):
+class VI(Gen, BackupMixin):
 
     @property
     def v(self):
@@ -523,7 +545,11 @@ class P(L):
         raise NotImplementedError
 
 
-class VISet:
+class DataSet:
+    pass
+
+
+class VISet(DataSet, BackupMixin):
 
     @property
     def n_appliances(self):
@@ -739,26 +765,3 @@ class VISet:
 
     def hash(self):
         return hash(self.data.tobytes()) & 0xFFFFFFFFFFFFFFFF
-
-    def save(self, filepath=None, make_dirs=False):
-        if filepath is None:
-            today = datetime.now().date()
-            filename = f'VIset-{today}-H{self.hash()}.pkl'
-            filepath = os.path.join(os.getcwd(), filename)
-        elif make_dirs:
-            dirpath = os.path.dirname(filepath)
-            os.makedirs(dirpath, exist_ok=True)
-
-        data = {'samples': self._data}
-
-        with open(filepath, 'wb') as fb:
-            pickle.dump(data, fb, protocol=HIGHEST_PROTOCOL)
-
-    @classmethod
-    def load(cls, filepath):
-        with open(filepath, 'rb') as fb:
-            data = pickle.load(fb)
-
-        samples = data['samples']
-
-        return cls(samples)
