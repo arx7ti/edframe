@@ -169,6 +169,7 @@ cython_debug/
 
 .DS_Store
 *.npy
+*.pkl
 *.svg
 *.png
 *.jpg
