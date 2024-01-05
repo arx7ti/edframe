@@ -585,6 +585,7 @@ class VISet(DataSet, BackupMixin):
     @property
     def targets(self):
         mlb = MultiLabelBinarizer()
+
         return mlb.fit_transform(self.labels)
 
     @property
@@ -691,6 +692,9 @@ class VISet(DataSet, BackupMixin):
             return signatures[0]
 
         return self.new(signatures)
+
+    def is_multilabel(self):
+        return (self.targets.sum(1) > 1).any()
 
     def appliances(self, names, exact_match=False):
         if not hasattr(names, '__len__'):
