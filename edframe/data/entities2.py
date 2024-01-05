@@ -572,19 +572,24 @@ class VISet(DataSet, BackupMixin):
 
         return data
 
-    # @property
-    # def labels(self):
-    #     labels = [vi.labels for vi in self.signatures]
+    @property
+    def labels(self):
+        labels = [vi.labels for vi in self.signatures]
 
-    #     return labels
+        return labels
 
     @property
     def appliance_types(self):
         return list(set(list(it.chain(*self.labels))))
 
-    # @property
-    # def targets(self):
-    #     return self._targets
+    @property
+    def targets(self):
+        mlb = MultiLabelBinarizer()
+        return mlb.fit_transform(self.labels)
+
+    @property
+    def fs(self):
+        return self.random().fs
 
     @classmethod
     def new(cls, *args, **kwargs):
@@ -655,11 +660,6 @@ class VISet(DataSet, BackupMixin):
             new_signatures.append(vi)
 
         self.signatures = new_signatures
-        # TODO if signature was updated
-        self.labels = [vi.labels for vi in self.signatures]
-        self._mlb = MultiLabelBinarizer()
-        self.targets = self._mlb.fit_transform(self.labels)
-        self._fs = vi.fs
 
     def __len__(self):
         return len(self.signatures)
@@ -696,7 +696,9 @@ class VISet(DataSet, BackupMixin):
         if not hasattr(names, '__len__'):
             names = [names]
 
-        query = self._mlb.transform([names])
+        mlb = MultiLabelBinarizer()
+        mlb.fit(self.labels)
+        query = mlb.transform([names])
 
         if exact_match:
             mask = (self.targets == query).all(1)
