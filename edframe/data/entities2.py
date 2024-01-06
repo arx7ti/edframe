@@ -762,8 +762,10 @@ class VISet(DataSet, BackupMixin):
 
         return X
 
-    def stats(self):
-        raise NotImplementedError
+    def stats(self, features=None, decimals=4, **kwargs):
+        X = self.features(features=features, format='pandas', **kwargs)
+
+        return X.describe().iloc[1:].round(decimals)
 
     def split(self, test_size=0.3, by_samples=True, random_state=None):
         if self.targets is not None:
