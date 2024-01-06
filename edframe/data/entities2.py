@@ -176,17 +176,17 @@ class VI(Gen, BackupMixin):
     def vspec(self, **kwargs):
         return spectrum(self.v, self.fs, **kwargs)
 
-    @feature
-    def trajectory(self):
-        raise NotImplementedError
+    # @feature
+    # def trajectory(self):
+    #     raise NotImplementedError
 
-    @feature
-    def spectral_centroid(self):
-        raise NotImplementedError
+    # @feature
+    # def spectral_centroid(self):
+    #     raise NotImplementedError
 
-    @feature
-    def temporal_centroid(self):
-        raise NotImplementedError
+    # @feature
+    # def temporal_centroid(self):
+    #     raise NotImplementedError
 
     def components_required(self, required=True):
         self._require_components = required
@@ -460,7 +460,13 @@ class VI(Gen, BackupMixin):
 
         return via, vir
 
-    def features(self, features, format='list', **kwargs):
+    def features(self, features=None, format='list', **kwargs):
+        if features is None:
+            features = [
+                k for k, v in self.__class__.__dict__.items()
+                if getattr(v, 'is_feature', False)
+            ]
+
         data = []
         f_kwargs = nested_dict()
         f_reps = {}
@@ -489,16 +495,27 @@ class VI(Gen, BackupMixin):
             else:
                 raise ValueError
 
-            value = feature_fn(**f_kwargs[feature])
+            values = feature_fn(**f_kwargs[feature])
 
-            if isinstance(value, Number):
-                data.append(value)
-                f_reps.update({feature: 0})
-            elif hasattr(value, '__len__'):
-                data.extend(value)
-                f_reps.update({feature: len(value)})
-            else:
-                raise ValueError
+            if not isinstance(values, tuple):
+                values = (values, )
+
+            k = 0
+            just_scalar = True
+
+            for v in values:
+                if isinstance(v, Number):
+                    k += 1
+                    data.append(v)
+                elif hasattr(v, '__len__'):
+                    just_scalar = False
+                    k += len(v)
+                    data.extend(v)
+                else:
+                    raise ValueError
+
+            k = 0 if k == 1 and len(values) == 1 and just_scalar else k
+            f_reps.update({feature: k})
 
         keys = lambda: list(
             it.chain(*[[
