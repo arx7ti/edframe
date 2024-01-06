@@ -176,9 +176,33 @@ class VI(Gen, BackupMixin):
     def vspec(self, **kwargs):
         return spectrum(self.v, self.fs, **kwargs)
 
-    # @feature
-    # def trajectory(self):
-    #     raise NotImplementedError
+    @feature
+    def trajectory(self, n_bins=50):
+        '''
+        ref: https://github.com/sambaiga/MLCFCD/blob/master/src/pre_processing/feature.py
+        '''
+        j = 0
+        V = self.v
+        I = self.i
+        V = V / abs(V).max()
+        I = I / abs(I).max()
+        x_bins = np.linspace(-1, 1, num=n_bins + 1)
+        y_bins = np.linspace(-1, 1, num=n_bins + 1)
+        T = np.zeros((n_bins, n_bins))
+
+        for x1, x2 in zip(x_bins[:-1], x_bins[1:]):
+            i = n_bins - 1
+
+            for y1, y2 in zip(y_bins[:-1], y_bins[1:]):
+                T[i, j] = sum((x1 <= self.i) & (self.i < x2) & (y1 <= self.v)
+                              & (self.v < y2))
+                i -= 1
+
+            j += 1
+
+        T = T / T.max()
+
+        return T
 
     # @feature
     # def spectral_centroid(self):
