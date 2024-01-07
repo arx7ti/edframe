@@ -16,7 +16,7 @@ from sklearn.preprocessing import MultiLabelBinarizer
 from datetime import datetime
 from .decorators import feature
 from pickle import HIGHEST_PROTOCOL
-from ..features import fundamental, spectrum, thd
+from ..features import fundamental, spectrum, thd, spectral_centroid, temporal_centroid
 from ..signals.exceptions import NotEnoughPeriods
 from ..signals import FITPS, downsample, upsample, roll, fryze, extrapolate, pad
 from ..utils.common import nested_dict
@@ -179,7 +179,7 @@ class VI(Gen, BackupMixin):
     @feature
     def trajectory(self, n_bins=50):
         '''
-        ref: https://github.com/sambaiga/MLCFCD/blob/master/src/pre_processing/feature.py
+        ref: github.com/sambaiga/MLCFCD
         '''
         j = 0
         V = self.v
@@ -204,13 +204,13 @@ class VI(Gen, BackupMixin):
 
         return T
 
-    # @feature
-    # def spectral_centroid(self):
-    #     raise NotImplementedError
+    @feature
+    def spectral_centroid(self):
+        return spectral_centroid(self.i)
 
-    # @feature
-    # def temporal_centroid(self):
-    #     raise NotImplementedError
+    @feature
+    def temporal_centroid(self):
+        return temporal_centroid(self.i)
 
     def components_required(self, required=True):
         self._require_components = required
@@ -490,6 +490,11 @@ class VI(Gen, BackupMixin):
                 k for k, v in self.__class__.__dict__.items()
                 if getattr(v, 'is_feature', False)
             ]
+        else:
+            ufeatures = set(features)
+
+            if len(ufeatures) != features:
+                raise ValueError
 
         data = []
         f_kwargs = nested_dict()
@@ -500,7 +505,6 @@ class VI(Gen, BackupMixin):
             if len(ks) > 1 & len(ks[0]) > 0:
                 f_kwargs[ks[0]].update({''.join(ks[1:]): v})
 
-        # TODO validate for dublicated names
         for feature in features:
             if isinstance(feature, str):
                 try:
@@ -519,6 +523,7 @@ class VI(Gen, BackupMixin):
             else:
                 raise ValueError
 
+            # TODO named output variables 
             values = feature_fn(**f_kwargs[feature])
 
             if not isinstance(values, tuple):
