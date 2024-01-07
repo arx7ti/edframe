@@ -7,6 +7,7 @@ import random
 import numpy as np
 import pandas as pd
 import itertools as it
+from copy import deepcopy
 from numbers import Number
 from inspect import isfunction
 from collections import defaultdict
@@ -78,12 +79,18 @@ class L(Gen):
 
 class VI(Gen, BackupMixin):
 
+    def __iaggrule__(self, i):
+        return i.sum(0)
+
+    def __vaggrule__(self, v):
+        return v.mean(0)
+
     @property
     def v(self):
         v = self.data[0]
 
         if self.n_components > 1:
-            v = v.mean(0)
+            v = self.__vaggrule__(v)
 
         return v
 
@@ -92,7 +99,7 @@ class VI(Gen, BackupMixin):
         i = self.data[1]
 
         if self.n_components > 1:
-            i = i.sum(0)
+            i = self.__iaggrule__(i)
 
         return i
 
@@ -212,8 +219,32 @@ class VI(Gen, BackupMixin):
     def temporal_centroid(self):
         return temporal_centroid(self.i)
 
-    def components_required(self, required=True):
-        self._require_components = required
+    def copy(self):
+        return deepcopy(self)
+
+    def squeeze(self):
+        if self.n_components == 1:
+            return self.copy()
+
+        v, i = self._data
+        v = self.__vaggrule__(v)
+        i = self.__iaggrule__(i)
+
+        return self.new(v,
+                        i,
+                        self.fs,
+                        is_aligned=self.is_aligned(),
+                        dims=self._dims)
+
+    def require_components(self, required=True):
+        if required:
+            vi = self.copy()
+        else:
+            vi = self.squeeze()
+
+        vi._require_components = required
+
+        return vi
 
     def __init__(self, v, i, fs, y=None, locs=None, **kwargs) -> None:
         assert v.shape == i.shape
@@ -290,6 +321,10 @@ class VI(Gen, BackupMixin):
             data2 = data2[:, None]
 
         v, i = np.concatenate((data1, data2), axis=1)
+
+        if not self._require_components or not vi._require_components:
+            v = self.__vaggrule__(v)
+            i = self.__iaggrule__(i)
 
         return self.new(v,
                         i,
@@ -469,7 +504,6 @@ class VI(Gen, BackupMixin):
         raise NotImplementedError
 
     def fryze(self):
-        # TODO component-wise
         i_a, i_r = fryze(*self.data)
         via = self.new(self.__v,
                        i_a,
@@ -523,7 +557,7 @@ class VI(Gen, BackupMixin):
             else:
                 raise ValueError
 
-            # TODO named output variables 
+            # TODO named output variables
             values = feature_fn(**f_kwargs[feature])
 
             if not isinstance(values, tuple):
