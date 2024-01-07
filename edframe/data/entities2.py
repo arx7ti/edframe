@@ -23,7 +23,7 @@ from ..signals import FITPS, downsample, upsample, roll, fryze, extrapolate, pad
 from ..utils.common import nested_dict
 
 
-class Gen:
+class Recording:
 
     @property
     def fs(self):
@@ -73,11 +73,11 @@ class BackupMixin:
         return instance
 
 
-class L(Gen):
+class L(Recording):
     pass
 
 
-class VI(Gen, BackupMixin):
+class VI(Recording, BackupMixin):
 
     def __iaggrule__(self, i):
         return i.sum(0)
@@ -184,6 +184,13 @@ class VI(Gen, BackupMixin):
         return spectrum(self.v, self.fs, **kwargs)
 
     @feature
+    def spectral_centroid(self):
+        return spectral_centroid(self.i)
+
+    @feature
+    def temporal_centroid(self):
+        return temporal_centroid(self.i)
+
     def trajectory(self, n_bins=50):
         '''
         ref: github.com/sambaiga/MLCFCD
@@ -211,18 +218,10 @@ class VI(Gen, BackupMixin):
 
         return T
 
-    @feature
-    def spectral_centroid(self):
-        return spectral_centroid(self.i)
-
-    @feature
-    def temporal_centroid(self):
-        return temporal_centroid(self.i)
-
     def copy(self):
         return deepcopy(self)
 
-    def squeeze(self):
+    def aggregate(self):
         if self.n_components == 1:
             return self.copy()
 
@@ -240,7 +239,7 @@ class VI(Gen, BackupMixin):
         if required:
             vi = self.copy()
         else:
-            vi = self.squeeze()
+            vi = self.aggregate()
 
         vi._require_components = required
 
@@ -343,7 +342,9 @@ class VI(Gen, BackupMixin):
 
     # TODO rename to `sync`
     def align(self):
-        # NOTE multi-component instance will be transformed into single-component
+        if self.n_components > 1:
+            raise AttributeError
+
         fitps = FITPS()
 
         # try

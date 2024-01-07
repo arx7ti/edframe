@@ -9,9 +9,9 @@ import math
 import inspect
 import numpy as np
 
-from ..features import rms, spectral_centroid
-from ..data.generators import make_hf_cycles_from
-from ._fitps import FITPS
+from edframe.features import rms, spectral_centroid
+from edframe.data.generators import make_hf_cycles_from
+from edframe.signals._fitps import FITPS
 
 
 def identity(x: np.ndarray):

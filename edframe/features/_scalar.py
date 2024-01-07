@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 
 from scipy.stats import gmean
-from ..utils.hf import zero_crossings
+from edframe.utils.hf import zero_crossings
 
 
 def spectral_centroid(x, normalized):

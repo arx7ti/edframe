@@ -11,8 +11,8 @@ from datetime import datetime, timedelta
 from statsmodels.tsa.ar_model import AutoReg
 
 # Internal packages
-from ...utils.random import tnormal, gaussian_mixture
-from ...utils.common import nested_dict, to_regular_dict
+from edframe.utils.random import tnormal, gaussian_mixture
+from edframe.utils.common import nested_dict, to_regular_dict
 
 
 def _distribute_samples(n_samples, n_appliances, n_modes_per_appliance):
