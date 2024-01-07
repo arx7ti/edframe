@@ -15,8 +15,8 @@ from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import MultiLabelBinarizer
 
 from datetime import datetime
-from .decorators import feature
 from pickle import HIGHEST_PROTOCOL
+from .decorators import feature, safe_mode
 from ..features import fundamental, spectrum, thd, spectral_centroid, temporal_centroid
 from ..signals.exceptions import NotEnoughPeriods
 from ..signals import FITPS, downsample, upsample, roll, fryze, extrapolate, pad
@@ -640,8 +640,12 @@ class VISet(DataSet, BackupMixin):
         return len(self)
 
     @property
+    def n_samples(self):
+        return self._n_samples
+
+    @property
     def size(self):
-        return self.n_signatures
+        return self.n_signatures, self.n_samples
 
     @property
     def data(self):
@@ -708,7 +712,10 @@ class VISet(DataSet, BackupMixin):
 
         return cls(data, **kwargs)
 
-    def __init__(self, signatures: list[VI], adjust_len_by='median'):
+    def __init__(self,
+                 signatures: list[VI],
+                 adjust_len_by='median',
+                 safe_mode=True):
         ls = [len(vi) for vi in signatures]
         fs = [vi.fs for vi in signatures]
         # TODO if f0 is undefined
@@ -721,27 +728,34 @@ class VISet(DataSet, BackupMixin):
         #     raise ValueError
 
         if adjust_len_by == 'median':
-            lsm = np.median(ls)
+            n_samples = np.median(ls)
         elif adjust_len_by == 'mean':
-            lsm = np.mean(ls)
+            n_samples = np.mean(ls)
         else:
             raise ValueError
 
-        lsm = int(round(lsm))
+        self._hashes = set()
         new_signatures = []
+        n_samples = int(round(n_samples))
 
-        for vi in signatures:
-            dn = lsm - len(vi)
+        while len(signatures) > 0:
+            vi = signatures.pop(0)
+            dn = n_samples - len(vi)
 
             # TODO if not aligned
             if dn > 0:
                 vi = vi.extrapolate(dn)
             elif dn < 0:
-                vi = vi[:lsm]
+                vi = vi[:n_samples]
+
+            if safe_mode:
+                self._hashes.add(vi.hash())
 
             new_signatures.append(vi)
 
         self.signatures = new_signatures
+        self._safe_mode = safe_mode
+        self._n_samples = n_samples
 
     def __len__(self):
         return len(self.signatures)
@@ -799,11 +813,12 @@ class VISet(DataSet, BackupMixin):
 
         return self.new(signatures)
 
-    def features(self, features, format='list', **kwargs):
+    @safe_mode
+    def features(self, features=None, format='list', **kwargs):
         X = []
 
         for vi in self.signatures:
-            x = vi.features(features, format=format, **kwargs)
+            x = vi.features(features=features, format=format, **kwargs)
             X.append(x)
 
         if format == 'numpy':
