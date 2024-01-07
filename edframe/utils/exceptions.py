@@ -1,2 +1,6 @@
-class NotEnoughPeriods(Exception):
+class NotEnoughCycles(Exception):
+    pass
+
+
+class SingleCycleOnly(Exception):
     pass

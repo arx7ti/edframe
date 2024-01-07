@@ -18,7 +18,7 @@ from datetime import datetime
 from pickle import HIGHEST_PROTOCOL
 from .decorators import feature, safe_mode
 from ..features import fundamental, spectrum, thd, spectral_centroid, temporal_centroid
-from ..utils.exceptions import NotEnoughPeriods
+from ..utils.exceptions import NotEnoughCycles, SingleCycleOnly
 from ..signals import FITPS, downsample, upsample, roll, fryze, extrapolate, pad
 from ..utils.common import nested_dict
 
@@ -93,8 +93,10 @@ class VI(Recording, BackupMixin):
         if self._f0 is None:
             try:
                 return fundamental(self.v, self.fs, mode='mean')
-            except NotEnoughPeriods:
+            except SingleCycleOnly:
                 return self.fs / self.n_samples
+            except NotEnoughCycles as e:
+                raise e
 
         return self._f0
 
@@ -380,7 +382,7 @@ class VI(Recording, BackupMixin):
 
         dims = v.shape
         v, i = v.ravel(), i.ravel()
-        # except NotEnoughPeriods:
+        # except NotEnoughCycles:
         # v, i = self.v, self.i
         # dims = 1, len(v)
 

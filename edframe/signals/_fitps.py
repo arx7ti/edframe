@@ -5,7 +5,7 @@ from numba import njit
 from typing import Optional
 from scipy.signal import butter, filtfilt
 
-from edframe.utils.exceptions import NotEnoughPeriods
+from edframe.utils.exceptions import NotEnoughCycles
 
 
 class FITPSNotCalledError(Exception):
@@ -41,7 +41,7 @@ class FITPS:
         self._zero_crossings = v0
 
         if len(v0) < 2:
-            raise NotEnoughPeriods
+            raise NotEnoughCycles
 
         dv = self._compute_shifts(v, v0)
 
