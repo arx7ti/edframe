@@ -18,7 +18,7 @@ from datetime import datetime
 from pickle import HIGHEST_PROTOCOL
 from .decorators import feature, safe_mode
 from ..features import fundamental, spectrum, thd, spectral_centroid, temporal_centroid
-from ..signals.exceptions import NotEnoughPeriods
+from ..utils.exceptions import NotEnoughPeriods
 from ..signals import FITPS, downsample, upsample, roll, fryze, extrapolate, pad
 from ..utils.common import nested_dict
 
@@ -37,16 +37,16 @@ class Recording:
     def new(cls, *args, **kwargs):
         return cls(*args, **kwargs)
 
-    def __init__(self, data, fs, y=None, locs=None) -> None:
-        if not hasattr(y, '__len__'):
-            y = [y]
+    def __init__(self, data, fs, appliances=None, locs=None) -> None:
+        if not hasattr(appliances, '__len__'):
+            appliances = [appliances]
 
-        if y is not None and locs is not None:
-            assert len(y) == len(locs)
+        if appliances is not None and locs is not None:
+            assert len(appliances) == len(locs)
 
         self._data = data
         self._fs = fs
-        self._y = y
+        self._appliances = appliances
         self._locs = locs
         self._require_components = True
 
@@ -86,6 +86,23 @@ class VI(Recording, BackupMixin):
         return v.mean(0)
 
     @property
+    def f0(self):
+        if self.is_aligned():
+            return self.fs / self.n_samples
+
+        if self._f0 is None:
+            try:
+                return fundamental(self.v, self.fs, mode='mean')
+            except NotEnoughPeriods:
+                return self.fs / self.n_samples
+
+        return self._f0
+
+    @property
+    def n_samples(self):
+        return self.data.shape[1]
+
+    @property
     def v(self):
         v = self.data[0]
 
@@ -119,7 +136,7 @@ class VI(Recording, BackupMixin):
 
     @property
     def labels(self):
-        return self._y
+        return self._appliances
 
     @property
     def n_components(self):
@@ -137,8 +154,8 @@ class VI(Recording, BackupMixin):
 
     @property
     def locs(self):
-        if self._locs is None and self._y is not None:
-            return [[0, len(self)] * len(self._y)]
+        if self._locs is None and self._appliances is not None:
+            return [[0, len(self)] * len(self._appliances)]
         elif self._locs is not None:
             return self._locs
 
@@ -156,10 +173,6 @@ class VI(Recording, BackupMixin):
         dphi = phi[np.argmax(a)]
 
         return dphi
-
-    @feature
-    def f0(self, mode='median'):
-        return fundamental(self.v, self.fs, mode=mode)
 
     @feature
     def if0(self, mode='median'):
@@ -245,13 +258,24 @@ class VI(Recording, BackupMixin):
 
         return vi
 
-    def __init__(self, v, i, fs, y=None, locs=None, **kwargs) -> None:
+    def __init__(
+        self,
+        v,
+        i,
+        fs,
+        f0=None,
+        appliances=None,
+        locs=None,
+        **kwargs,
+    ) -> None:
+        # TODO f0?
         assert v.shape == i.shape
 
         data = np.stack((v, i))
         self._is_aligned = kwargs.get('is_aligned', False)
         self._dims = kwargs.get('dims', None)
-        super().__init__(data, fs, y=y, locs=locs)
+        self._f0 = f0
+        super().__init__(data, fs, appliances=appliances, locs=locs)
 
     def __len__(self):
         return self.data.shape[-1]
@@ -675,7 +699,11 @@ class VISet(DataSet, BackupMixin):
 
     @property
     def fs(self):
-        return self.random().fs
+        return self._fs
+
+    @property
+    def f0(self):
+        return self._f0
 
     @classmethod
     def new(cls, *args, **kwargs):
@@ -712,10 +740,13 @@ class VISet(DataSet, BackupMixin):
 
         return cls(data, **kwargs)
 
-    def __init__(self,
-                 signatures: list[VI],
-                 adjust_len_by='median',
-                 safe_mode=True):
+    def __init__(
+        self,
+        signatures: list[VI],
+        f0=None,
+        adjust_len_by='median',
+        safe_mode=True,
+    ):
         ls = [len(vi) for vi in signatures]
         fs = [vi.fs for vi in signatures]
         # TODO if f0 is undefined
@@ -756,6 +787,8 @@ class VISet(DataSet, BackupMixin):
         self.signatures = new_signatures
         self._safe_mode = safe_mode
         self._n_samples = n_samples
+        self._fs = new_signatures[0].fs
+        self._f0 = new_signatures[0].f0 if f0 is None else f0
 
     def __len__(self):
         return len(self.signatures)

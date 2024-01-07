@@ -4,6 +4,7 @@ import numpy as np
 
 from scipy.stats import gmean
 from edframe.utils.hf import zero_crossings
+from edframe.utils.exceptions import NotEnoughPeriods
 
 
 def spectral_centroid(x, normalized):
@@ -38,7 +39,7 @@ def zero_crossing_rate(x, mode='median'):
     x0 = zero_crossings(x)
 
     if len(x0) <= 1:
-        raise ValueError
+        raise NotEnoughPeriods 
 
     if mode == 'mean':
         x0_rate = np.diff(x0).mean()

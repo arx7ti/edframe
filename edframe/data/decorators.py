@@ -13,7 +13,7 @@ def safe_mode(method):
             for i, vi in enumerate(self.signatures):
                 if vi.hash() not in self._hashes:
                     # Check f0
-                    if vi.f0() != self.f0:
+                    if vi.f0 != self.f0:
                         raise ValueError
 
                     # Check fs

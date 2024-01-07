@@ -5,7 +5,7 @@ from numba import njit
 from typing import Optional
 from scipy.signal import butter, filtfilt
 
-from .exceptions import NotEnoughPeriods
+from edframe.utils.exceptions import NotEnoughPeriods
 
 
 class FITPSNotCalledError(Exception):
