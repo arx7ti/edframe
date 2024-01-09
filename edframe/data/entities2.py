@@ -583,6 +583,8 @@ class VI(Recording, BackupMixin):
         return cls(v, i, fs=fs, is_aligned=False)
 
     def budeanu(self):
+        # TODO multiple cycles support
+        # TODO multi-component support
         V, I = self._data
         const = 2 / self.n_samples
         Zv = np.fft.rfft(V, axis=-1)
