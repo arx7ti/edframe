@@ -17,7 +17,7 @@ from sklearn.preprocessing import MultiLabelBinarizer
 from datetime import datetime
 from pickle import HIGHEST_PROTOCOL
 from .decorators import feature, safe_mode
-from ..features import fundamental, spectrum, thd, spectral_centroid, temporal_centroid
+from ..features import fundamental, spectrum, thd, spectral_centroid, temporal_centroid, rms
 from ..utils.exceptions import NotEnoughCycles, SingleCycleOnly
 from ..signals import FITPS, downsample, upsample, roll, fryze, extrapolate, pad
 from ..utils.common import nested_dict
@@ -544,6 +544,85 @@ class VI(Recording, BackupMixin):
                        dims=self._dims)
 
         return via, vir
+
+    @staticmethod
+    def _sine_waveform(amp, f0, fs, phase=0, dt=None, n=None):
+        dt = 1 / f0 if dt is None else dt
+        n = round(fs * dt) if n is None else n
+        x = np.linspace(0, dt, n)
+        y = amp * np.sin(2 * np.pi * f0 * x + phase)
+
+        return y
+
+    @classmethod
+    def active_load(cls, v_amp, i_amp, fs, f0, dt=None, n=None):
+        v = cls._sine_waveform(v_amp, f0, fs, dt=dt, n=n)
+        i = cls._sine_waveform(i_amp, f0, fs, dt=dt, n=n)
+
+        # TODO check dims are needed for all aligned
+        return cls(v, i, fs=fs, is_aligned=False)
+
+    @classmethod
+    def reactive_load(
+        cls,
+        v_amp,
+        i_amp,
+        fs,
+        f0,
+        power_factor=1.0,
+        dt=None,
+        n=None,
+    ):
+        assert power_factor >= 0 and power_factor <= 1
+
+        phase = np.arccos(power_factor)
+        v = cls._sine_waveform(v_amp, f0, fs, dt=dt, n=n)
+        i = cls._sine_waveform(i_amp, f0, fs, phase=phase, dt=dt, n=n)
+
+        # TODO check dims are needed for all aligned
+        return cls(v, i, fs=fs, is_aligned=False)
+
+    def budeanu(self):
+        V, I = self._data
+        const = 2 / self.n_samples
+        Zv = np.fft.rfft(V, axis=-1)
+        Zi = np.fft.rfft(I, axis=-1)
+
+        V, I = abs(Zv), abs(Zi)
+        V, I = const * V, const * I
+        phi = np.angle(Zv) - np.angle(Zi)
+
+        P = V * I * np.cos(phi)
+        Q = V * I * np.sin(phi)
+        P = P[1:].sum(-1) / 2 + P[0] / 4
+        Q = Q[1:].sum(-1) / 2 + Q[0] / 4
+
+        Vrms = np.sqrt((V[1:]**2 / 2).sum(-1) + (V[0] / 2)**2)
+        U = np.fft.irfft(V * np.exp(1j * phi - 1j * np.pi / 2) / const)
+        ia = P / Vrms**2 * self.v
+        iq = Q / Vrms**2 * U
+        id = self.i - ia - iq
+
+        a = self.new(self.__v,
+                     ia,
+                     self.fs,
+                     f0=self.f0,
+                     is_aligned=self.is_aligned(),
+                     dims=self._dims)
+        q = self.new(self.__v,
+                     iq,
+                     self.fs,
+                     f0=self.f0,
+                     is_aligned=self.is_aligned(),
+                     dims=self._dims)
+        d = self.new(self.__v,
+                     id,
+                     self.fs,
+                     f0=self.f0,
+                     is_aligned=self.is_aligned(),
+                     dims=self._dims)
+
+        return a, q, d
 
     def features(self, features=None, format='list', **kwargs):
         if features is None:
