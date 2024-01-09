@@ -295,8 +295,41 @@ def fryze(v, i):
     s = v * i
     ia = s.mean(-1, keepdims=True) * v / rms(v, axis=-1, keepdims=True)**2
     ir = i - ia
+
     return ia, ir
 
 
 def budeanu(v, i):
-    raise NotImplementedError
+    # TODO multiple cycles support
+    # Fourier Transform
+    zv = np.fft.rfft(v, axis=-1)
+    zi = np.fft.rfft(i, axis=-1)
+
+    # Compute RMS amplitudes
+    const = 2 / v.shape[-1] / np.sqrt(2)
+    V, I = abs(zv), abs(zi)
+    V[..., 1:], I[..., 1:] = const * V[..., 1:], const * I[..., 1:]
+    V[..., 0], I[..., 0] = V[..., 0] / v.shape[-1], I[..., 0] / v.shape[-1]
+
+    # Compute phase differences between current and voltage
+    phi = np.angle(zv) - np.angle(zi)
+
+    # Perform Budeanu decomposition
+    P = V * I * np.cos(phi)
+    Q = V * I * np.sin(phi)
+    P = P.sum(-1)
+    Q = Q.sum(-1)
+
+    # Compute active component of current
+    Vrms = np.sqrt((V**2).sum(-1))
+    ia = P / Vrms**2 * v
+
+    # Compute reactive component of current
+    zv[1:] *= 1j
+    u = np.fft.irfft(zv, axis=-1, n=v.shape[-1])
+    iq = Q / Vrms**2 * u
+
+    # Compute distortion component of current
+    id = i - ia - iq
+
+    return ia, iq, id

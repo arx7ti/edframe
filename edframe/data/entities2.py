@@ -19,7 +19,7 @@ from pickle import HIGHEST_PROTOCOL
 from .decorators import feature, safe_mode
 from ..features import fundamental, spectrum, thd, spectral_centroid, temporal_centroid, rms
 from ..utils.exceptions import NotEnoughCycles, SingleCycleOnly
-from ..signals import FITPS, downsample, upsample, roll, fryze, extrapolate, pad
+from ..signals import FITPS, downsample, upsample, roll, fryze, budeanu, extrapolate, pad
 from ..utils.common import nested_dict
 
 
@@ -87,7 +87,7 @@ class VI(Recording, BackupMixin):
 
     @property
     def f0(self):
-        if self.is_aligned():
+        if self.is_synced():
             return self.fs / self.n_samples
 
         if self._f0 is None:
@@ -247,7 +247,7 @@ class VI(Recording, BackupMixin):
         return self.new(v,
                         i,
                         self.fs,
-                        is_aligned=self.is_aligned(),
+                        is_synced=self.is_synced(),
                         dims=self._dims)
 
     def require_components(self, required=True):
@@ -270,11 +270,10 @@ class VI(Recording, BackupMixin):
         locs=None,
         **kwargs,
     ) -> None:
-        # TODO f0?
         assert v.shape == i.shape
 
         data = np.stack((v, i))
-        self._is_aligned = kwargs.get('is_aligned', False)
+        self._is_synced = kwargs.get('is_synced', False)
         self._dims = kwargs.get('dims', None)
         self._f0 = f0
         super().__init__(data, fs, appliances=appliances, locs=locs)
@@ -283,7 +282,13 @@ class VI(Recording, BackupMixin):
         return self.data.shape[-1]
 
     def _get_dims(self):
-        dims = (-1, *self._dims) if self.n_components > 1 else self._dims
+        if self.is_synced() and self.n_components > 1:
+            dims = (self.n_components, *self._dims)
+        elif self.n_components > 1:
+            dims = (self.n_components, self.n_samples)
+        else:
+            dims = self._dims
+
         return dims
 
     def __getitem__(self, indexer):
@@ -291,7 +296,7 @@ class VI(Recording, BackupMixin):
             assert len(indexer) == 2
             indexer, _ = indexer
 
-            if not self.is_aligned():
+            if not self.is_synced():
                 raise ValueError
 
             if isinstance(_, slice):
@@ -301,19 +306,19 @@ class VI(Recording, BackupMixin):
                 raise ValueError
 
             data = self.data.reshape(2, *self._get_dims())
-            keep_aligned = True
+            keep_synced = True
         elif not isinstance(indexer, slice):
             raise ValueError
         else:
             data = self.data
-            keep_aligned = False
+            keep_synced = False
 
         if self.n_components > 1:
             data = data[:, :, indexer]
         else:
             data = data[:, indexer]
 
-        if keep_aligned:
+        if keep_synced:
             dims = data.shape[-2:]
             dims = (self.n_components, -1) if self.n_components > 1 else -1
             data = data.reshape(2, *dims)
@@ -322,7 +327,7 @@ class VI(Recording, BackupMixin):
 
         v, i = data
 
-        return self.new(v, i, self.fs, is_aligned=keep_aligned, dims=dims)
+        return self.new(v, i, self.fs, is_synced=keep_synced, dims=dims)
 
     def __add__(self, vi):
         return self.add(vi)
@@ -331,7 +336,7 @@ class VI(Recording, BackupMixin):
         return self.add(vi)
 
     def add(self, vi):
-        if not (self.is_aligned() and vi.is_aligned()):
+        if not (self.is_synced() and vi.is_synced()):
             raise ValueError
 
         if self.fs != vi.fs:
@@ -354,11 +359,11 @@ class VI(Recording, BackupMixin):
         return self.new(v,
                         i,
                         self.fs,
-                        is_aligned=self.is_aligned(),
+                        is_synced=self.is_synced(),
                         dims=self._dims)
 
-    def is_aligned(self):
-        return self._is_aligned
+    def is_synced(self):
+        return self._is_synced
 
     def has_locs(self):
         return self.locs is not None
@@ -366,27 +371,26 @@ class VI(Recording, BackupMixin):
     def is_empty(self):
         return len(self) == 0
 
-    # TODO rename to `sync`
-    def align(self):
+    def sync(self):
         if self.n_components > 1:
             raise AttributeError
 
         fitps = FITPS()
 
-        # try
-        if self.has_locs():
-            v, i, locs = fitps(self.v, self.i, fs=self.fs, locs=self.locs)
-        else:
-            v, i = fitps(self.v, self.i, fs=self.fs)
-            locs = None
+        try:
+            if self.has_locs():
+                v, i, locs = fitps(self.v, self.i, fs=self.fs, locs=self.locs)
+            else:
+                v, i = fitps(self.v, self.i, fs=self.fs)
+                locs = None
 
-        dims = v.shape
-        v, i = v.ravel(), i.ravel()
-        # except NotEnoughCycles:
-        # v, i = self.v, self.i
-        # dims = 1, len(v)
+            dims = v.shape
+            v, i = v.ravel(), i.ravel()
+        except NotEnoughCycles:
+            v, i = self.v, self.i
+            dims = 1, len(v)
 
-        return self.new(v, i, self.fs, is_aligned=True, dims=dims, locs=locs)
+        return self.new(v, i, self.fs, is_synced=True, dims=dims, locs=locs)
 
     def resample(self, fs, **kwargs):
         if fs > self.fs:
@@ -406,13 +410,13 @@ class VI(Recording, BackupMixin):
         return self.new(v,
                         i,
                         fs,
-                        is_aligned=self.is_aligned(),
+                        is_synced=self.is_synced(),
                         dims=self._dims,
                         locs=locs)
 
     def cycle(self, mode='mean'):
-        if not self.is_aligned():
-            self = self.align()
+        if not self.is_synced():
+            self = self.sync()
 
         data = self.data.reshape(2, *self._get_dims())
 
@@ -426,19 +430,19 @@ class VI(Recording, BackupMixin):
         v, i = data
         dims = 1, v.shape[-1]
 
-        return self.new(v, i, self.fs, is_aligned=self.is_aligned(), dims=dims)
+        return self.new(v, i, self.fs, is_synced=self.is_synced(), dims=dims)
 
     def roll(self, n, outer=False):
         if n == 0:
             return self.new(self.__v,
                             self.__i,
                             self.fs,
-                            is_aligned=self.is_aligned(),
+                            is_synced=self.is_synced(),
                             dims=self._dims)
 
         n = len(self) if abs(n) > len(self) else n
 
-        if outer and not self.is_aligned():
+        if outer and not self.is_synced():
             raise ValueError
 
         if outer:
@@ -462,7 +466,7 @@ class VI(Recording, BackupMixin):
         return self.new(v,
                         i,
                         self.fs,
-                        is_aligned=self.is_aligned(),
+                        is_synced=self.is_synced(),
                         dims=self._dims,
                         locs=locs)
 
@@ -470,13 +474,13 @@ class VI(Recording, BackupMixin):
         if self.n_components > 1:
             raise NotImplementedError
 
-        if self.is_aligned():
+        if self.is_synced():
             dims = self._get_dims()
             v, i = self.data.reshape(2, *dims)
-            is_aligned = n % dims[1] == 0
+            is_synced = n % dims[1] == 0
         else:
             v, i = self.data
-            is_aligned = False
+            is_synced = False
 
         v, i = extrapolate(i, n, v=v, **kwargs)
         locs = None
@@ -489,7 +493,7 @@ class VI(Recording, BackupMixin):
         return self.new(v,
                         i,
                         self.fs,
-                        is_aligned=is_aligned,
+                        is_synced=is_synced,
                         dims=self._dims,
                         locs=locs)
 
@@ -497,13 +501,13 @@ class VI(Recording, BackupMixin):
         if self.n_components > 1:
             raise NotImplementedError
 
-        if self.is_aligned():
+        if self.is_synced():
             dims = self._get_dims()
             v, i = self.data.reshape(2, *dims)
-            is_aligned = n % dims[1] == 0
+            is_synced = n % dims[1] == 0
         else:
             v, i = self.data
-            is_aligned = False
+            is_synced = False
 
         _, v = extrapolate(v, n, v=v, **kwargs)
         i = pad(i.ravel(), n, **kwargs)
@@ -511,7 +515,7 @@ class VI(Recording, BackupMixin):
         return self.new(v,
                         i,
                         self.fs,
-                        is_aligned=is_aligned,
+                        is_synced=is_synced,
                         dims=self._dims,
                         locs=self.locs)
 
@@ -522,7 +526,7 @@ class VI(Recording, BackupMixin):
         return self.new(v,
                         i,
                         self.fs,
-                        is_aligned=self.is_aligned(),
+                        is_synced=self.is_synced(),
                         dims=self._dims)
 
     def steady_state(self):
@@ -535,12 +539,12 @@ class VI(Recording, BackupMixin):
         via = self.new(self.__v,
                        i_a,
                        fs=self.fs,
-                       is_aligned=self.is_aligned(),
+                       is_synced=self.is_synced(),
                        dims=self._dims)
         vir = self.new(self.__v,
                        i_r,
                        fs=self.fs,
-                       is_aligned=self.is_aligned(),
+                       is_synced=self.is_synced(),
                        dims=self._dims)
 
         return via, vir
@@ -559,8 +563,8 @@ class VI(Recording, BackupMixin):
         v = cls._sine_waveform(v_amp, f0, fs, dt=dt, n=n)
         i = cls._sine_waveform(i_amp, f0, fs, dt=dt, n=n)
 
-        # TODO check dims are needed for all aligned
-        return cls(v, i, fs=fs, is_aligned=False)
+        # TODO check dims are needed for all synced
+        return cls(v, i, fs=fs, is_synced=False)
 
     @classmethod
     def reactive_load(
@@ -579,50 +583,31 @@ class VI(Recording, BackupMixin):
         v = cls._sine_waveform(v_amp, f0, fs, dt=dt, n=n)
         i = cls._sine_waveform(i_amp, f0, fs, phase=phase, dt=dt, n=n)
 
-        # TODO check dims are needed for all aligned
-        return cls(v, i, fs=fs, is_aligned=False)
+        # TODO check dims are needed for all synced
+        return cls(v, i, fs=fs, is_synced=False)
 
     def budeanu(self):
-        # TODO multiple cycles support
-        # TODO multi-component support
-        V, I = self._data
-        const = 2 / self.n_samples
-        Zv = np.fft.rfft(V, axis=-1)
-        Zi = np.fft.rfft(I, axis=-1)
+        v, i = self._data
+        ia, iq, id = budeanu(v, i)
 
-        V, I = abs(Zv), abs(Zi)
-        V, I = const * V, const * I
-        phi = np.angle(Zv) - np.angle(Zi)
-
-        P = V * I * np.cos(phi)
-        Q = V * I * np.sin(phi)
-        P = P[1:].sum(-1) / 2 + P[0] / 4
-        Q = Q[1:].sum(-1) / 2 + Q[0] / 4
-
-        Vrms = np.sqrt((V[1:]**2 / 2).sum(-1) + (V[0] / 2)**2)
-        U = np.fft.irfft(V * np.exp(1j * phi - 1j * np.pi / 2) / const)
-        ia = P / Vrms**2 * self.v
-        iq = Q / Vrms**2 * U
-        id = self.i - ia - iq
-
-        a = self.new(self.__v,
+        a = self.new(v,
                      ia,
                      self.fs,
                      f0=self.f0,
-                     is_aligned=self.is_aligned(),
-                     dims=self._dims)
-        q = self.new(self.__v,
+                     is_synced=self.is_synced(),
+                     dims=self._get_dims())
+        q = self.new(v,
                      iq,
                      self.fs,
                      f0=self.f0,
-                     is_aligned=self.is_aligned(),
-                     dims=self._dims)
-        d = self.new(self.__v,
+                     is_synced=self.is_synced(),
+                     dims=self._get_dims())
+        d = self.new(v,
                      id,
                      self.fs,
                      f0=self.f0,
-                     is_aligned=self.is_aligned(),
-                     dims=self._dims)
+                     is_synced=self.is_synced(),
+                     dims=self._get_dims())
 
         return a, q, d
 
@@ -765,6 +750,10 @@ class VISet(DataSet, BackupMixin):
         return data
 
     @property
+    def values(self):
+        return self.s
+
+    @property
     def labels(self):
         labels = [vi.labels for vi in self.signatures]
 
@@ -856,7 +845,7 @@ class VISet(DataSet, BackupMixin):
             vi = signatures.pop(0)
             dn = n_samples - len(vi)
 
-            # TODO if not aligned
+            # TODO if not synced
             if dn > 0:
                 vi = vi.extrapolate(dn)
             elif dn < 0:
