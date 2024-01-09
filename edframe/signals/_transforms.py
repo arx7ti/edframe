@@ -325,7 +325,7 @@ def budeanu(v, i):
     ia = P / Vrms**2 * v
 
     # Compute reactive component of current
-    zv[1:] *= 1j
+    zv[..., 1:] *= 1j
     u = np.fft.irfft(zv, axis=-1, n=v.shape[-1])
     iq = Q / Vrms**2 * u
 
