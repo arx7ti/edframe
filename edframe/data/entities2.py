@@ -79,10 +79,12 @@ class L(Recording):
 
 class VI(Recording, BackupMixin):
 
-    def __iaggrule__(self, i):
+    @staticmethod
+    def __iaggrule__(i):
         return i.sum(0)
 
-    def __vaggrule__(self, v):
+    @staticmethod
+    def __vaggrule__(v):
         return v.mean(0)
 
     @property
@@ -336,6 +338,10 @@ class VI(Recording, BackupMixin):
         return self.add(vi)
 
     def add(self, vi):
+        # FIXME
+        if isinstance(vi, int) and vi == 0:
+            return self
+
         if not (self.is_synced() and vi.is_synced()):
             raise ValueError
 
@@ -375,6 +381,9 @@ class VI(Recording, BackupMixin):
         if self.n_components > 1:
             raise AttributeError
 
+        if self.is_synced():
+            return self.copy()
+
         fitps = FITPS()
 
         try:
@@ -393,6 +402,7 @@ class VI(Recording, BackupMixin):
         return self.new(v, i, self.fs, is_synced=True, dims=dims, locs=locs)
 
     def resample(self, fs, **kwargs):
+        # TODO critical sampling rate condition 
         if fs > self.fs:
             v, i = upsample(self.data, self.fs, fs, **kwargs)
         elif fs < self.fs:

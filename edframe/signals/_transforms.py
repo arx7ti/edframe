@@ -19,9 +19,15 @@ def identity(x: np.ndarray):
 
 
 def downsample(x: np.ndarray, fs0: int, fs: int, axis: int = -1) -> np.ndarray:
+    if fs > fs0:
+        raise ValueError
+
     n = x.shape[-1]
     n_new = round(n / fs0 * fs)
-    assert n_new < n
+    # assert n_new < n
+
+    if n_new == n:
+        return x
 
     if axis < 0:
         axis = len(x.shape) + axis
@@ -41,9 +47,15 @@ def upsample(
     kind: str = 'linear',
     axis: int = -1,
 ) -> np.ndarray:
+    if fs < fs0:
+        raise ValueError
+
     n = x.shape[-1]
     n_new = round(n / fs0 * fs)
-    assert n_new > n
+    # assert n_new > n
+
+    if n_new == n:
+        return x
 
     t0 = np.linspace(0, 1, n, dtype=x.dtype)
     t1 = np.linspace(0, 1, n_new, dtype=x.dtype)
