@@ -18,7 +18,7 @@ from datetime import datetime
 from pickle import HIGHEST_PROTOCOL
 from .decorators import feature, safe_mode
 from ..features import fundamental, spectrum, thd, spectral_centroid, temporal_centroid, rms
-from ..utils.exceptions import NotEnoughCycles, SingleCycleOnly
+from ..utils.exceptions import NotEnoughCycles, SingleCycleOnly, SamplingRateMismatch, MainsFrequencyMismatch
 from ..signals import FITPS, downsample, upsample, roll, fryze, budeanu, extrapolate, pad
 from ..utils.common import nested_dict
 
@@ -360,10 +360,10 @@ class VI(Recording, BackupMixin):
             return self
 
         if self.fs != vi.fs:
-            raise ValueError
+            raise SamplingRateMismatch
 
         if self.f0 != vi.f0:
-            raise ValueError
+            raise MainsFrequencyMismatch
 
         data1, data2 = self.data, vi.data
         v, i = np.concatenate((data1, data2), axis=1)
