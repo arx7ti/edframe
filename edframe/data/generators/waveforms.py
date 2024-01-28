@@ -69,8 +69,8 @@ def make_hf_cycles_from(X, n_samples=100, reg=1e-12):
         corr_coef = ar.params[1]
         cluster_std = np.sqrt(ar.sigma2)
     else:
-        corr_coef = 0 
-        cluster_std = np.std(r) 
+        corr_coef = 0
+        cluster_std = np.std(r)
 
     h = Z.shape[1]
 
@@ -235,8 +235,8 @@ def make_oscillations(
         f0=50.,
         **cycles_kwargs,
 ):
-    cycle_size = round(fs / f0)
-    time = np.linspace(0, dt, round(dt * f0 * cycle_size))
+    cycle_size = math.ceil(fs / f0)
+    time = np.linspace(0, dt, math.ceil(dt * f0 * cycle_size))
     n_cycles_per_signature = math.ceil(len(time) / cycle_size)
 
     psr_centers = np.random.uniform(*psr_range, n_appliances)
@@ -302,7 +302,7 @@ def make_rms_cycle(
     std=1e-2,
     **kwargs,
 ):
-    n = np.round(fs * dt).astype(int)
+    n = np.ceil(fs * dt).astype(int)
     t_exp = np.linspace(0, dt, n)
 
     cycle = level * np.ones(n)
@@ -349,7 +349,7 @@ def make_rms_signature(
     # Multiplicative scale
     dt = tnormal(1 / fs, loc=dt, scale=dt * std, size=n_cycles)
     pad_width = tnormal(0, loc=pad_width, scale=pad_width * std, size=n_cycles)
-    pad_width = np.round(fs * pad_width).astype(int)
+    pad_width = np.ceil(fs * pad_width).astype(int)
     level = tnormal(a=0, loc=level, scale=level * std, size=n_cycles)
     decay = tnormal(a=0, loc=decay, scale=decay * std, size=n_cycles)
     a = tnormal(0, loc=a, scale=a * std, size=n_cycles)
@@ -510,7 +510,7 @@ def make_households(
 ):
     assert identical_signatures >= 0 and identical_signatures <= 1
 
-    tday = np.linspace(0, 24, round(86400 * fs))
+    tday = np.linspace(0, 24, math.ceil(86400 * fs))
     n_activations = np.random.randint(*n_activations_range, n_appliances)
     n_activations = np.random.poisson(n_activations,
                                       (n_households * n_days, n_appliances))
@@ -534,7 +534,7 @@ def make_households(
     n_signatures = n_activations.sum(0)
     assert all(n_signatures == list(map(len, activations)))
 
-    n_unique = np.round((1 - identical_signatures) * n_signatures).astype(int)
+    n_unique = np.ceil((1 - identical_signatures) * n_signatures).astype(int)
     n0 = (n_unique == 0) & (n_signatures > 0)
     n_unique[n0] = 1
     n_identical = n_signatures - n_unique

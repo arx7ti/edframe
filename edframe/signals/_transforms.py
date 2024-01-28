@@ -18,47 +18,49 @@ def identity(x: np.ndarray):
     return x
 
 
-def downsample(x: np.ndarray, fs0: int, fs: int, axis: int = -1) -> np.ndarray:
-    if fs > fs0:
-        raise ValueError
+def downsample(
+    x: np.ndarray,
+    n,
+    axis: int = -1,
+) -> np.ndarray:
+    # if fs > fs0:
+    #     raise ValueError
 
-    n = x.shape[-1]
-    n_new = round(n / fs0 * fs)
+    # n = x.shape[-1]
+    # n_new = kwargs.get('n', round(n / fs0 * fs))
     # assert n_new < n
-
-    if n_new == n:
-        return x
+    n = int(n)
 
     if axis < 0:
         axis = len(x.shape) + axis
 
+    if n == x.shape[axis]:
+        return x
+
     if axis >= len(x.shape):
         raise ValueError
 
-    x = resample(x, n_new, axis=axis)
+    x = resample(x, n, axis=axis)
 
     return x
 
 
 def upsample(
     x: np.ndarray,
-    fs0: int,
-    fs: int,
+    n: int,
     kind: str = 'linear',
     axis: int = -1,
 ) -> np.ndarray:
-    if fs < fs0:
-        raise ValueError
+    if axis < 0:
+        axis = len(x.shape) + axis
 
-    n = x.shape[-1]
-    n_new = round(n / fs0 * fs)
-    # assert n_new > n
-
-    if n_new == n:
+    if n == x.shape[axis]:
         return x
 
-    t0 = np.linspace(0, 1, n, dtype=x.dtype)
-    t1 = np.linspace(0, 1, n_new, dtype=x.dtype)
+    n = int(n)
+
+    t0 = np.linspace(0, 1, x.shape[axis], dtype=x.dtype)
+    t1 = np.linspace(0, 1, n, dtype=x.dtype)
     mean = x.mean(axis, keepdims=True)
     x = x - mean
     upsampler = interp1d(t0, x, kind=kind, axis=axis)
@@ -255,11 +257,15 @@ def extrapolate(
         if x0 is None:
             assert fs is not None
             assert f0 is not None
-            T = round(fs / f0)
+
+            T = math.ceil(fs / f0)
             # TODO if not whole cycles (amp issue)
-            x0 = np.arange(0, len(x) + T, T)
+            x0 = np.arange(0, len(x) + T if len(x) % T == 0 else len(x), T)
         else:
-            T = round(np.diff(x0).mean())
+            T = math.ceil(np.diff(x0).mean())
+
+        if len(x) // T == 0:
+            raise ValueError
 
         # Obtain synchronized signal with equal number of samples per cycle
         dx = np.zeros(len(x0))
