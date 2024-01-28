@@ -71,22 +71,32 @@ def upsample(
 def pad(
     x: np.ndarray,
     n: int | tuple[int, int],
-    axis: int = -1,
+    # **kwargs,
 ) -> np.ndarray:
+    assert len(x.shape) <= 2 and len(x.shape) > 0
+
     # TODO pad with values
     if isinstance(n, tuple):
         a, b = n
     else:
         a, b = n - n // 2, n // 2
 
-    if axis < 0:
-        axis = len(x.shape) + axis
+    is_synced = len(x.shape) == 2
+    # cut_if_synced = kwargs.get('cut_if_synced', False)
 
-    x = np.swapaxes(x, axis, -1)
-    xa = np.zeros((*x.shape[:-1], a))
-    xb = np.zeros((*x.shape[:-1], b))
-    x = np.concatenate((xa, x, xb), axis=-1)
-    x = np.swapaxes(x, -1, axis)
+    if is_synced:
+        n_samples = x.shape[1]
+        a, b = (a, n_samples), (b, n_samples)
+
+    xa = np.zeros(a)
+    xb = np.zeros(b)
+    x = np.concatenate((xa, x, xb))
+
+    # if is_synced and cut_if_synced:
+    #     x = x.ravel()
+    #     n_orig = np.product(x.shape)
+    #     x = x[(n_samples - a[0]) % n_samples:]
+    #     x = x[:n_orig + a + b[0]]
 
     return x
 
@@ -116,74 +126,70 @@ def crop(x: np.ndarray, a: int, b: int, axis=-1) -> np.ndarray:
     return x
 
 
-def replicate(
-    x: np.ndarray,
-    n: int | tuple[int, int],
-    axis: int = -1,
-) -> np.ndarray:
-    if isinstance(n, int):
-        a, b = 0, n
-    else:
-        a, b = n
+# def replicate(
+#     x: np.ndarray,
+#     n: int | tuple[int, int],
+#     axis: int = -1,
+# ) -> np.ndarray:
+#     if isinstance(n, int):
+#         a, b = 0, n
+#     else:
+#         a, b = n
 
-    if axis < 0:
-        axis = len(x.shape) + axis
+#     if axis < 0:
+#         axis = len(x.shape) + axis
 
-    x = np.swapaxes(x, axis, -1)
+#     x = np.swapaxes(x, axis, -1)
 
-    if a > 0:
-        xa = np.repeat(x[..., :1], a, axis=-1)
-    else:
-        xa = np.empty((*x.shape[:-1], 0))
+#     if a > 0:
+#         xa = np.repeat(x[..., :1], a, axis=-1)
+#     else:
+#         xa = np.empty((*x.shape[:-1], 0))
 
-    if b > 0:
-        xb = np.repeat(x[..., -1:], b, axis=-1)
-    else:
-        xb = np.empty((*x.shape[:-1], 0))
+#     if b > 0:
+#         xb = np.repeat(x[..., -1:], b, axis=-1)
+#     else:
+#         xb = np.empty((*x.shape[:-1], 0))
 
-    x = np.concatenate((xa, x, xb), axis=-1)
-    x = np.swapaxes(x, -1, axis)
+#     x = np.concatenate((xa, x, xb), axis=-1)
+#     x = np.swapaxes(x, -1, axis)
 
-    return x
+#     return x
 
+# def extrapolate2d(x, n, **kwargs):
+#     assert len(x.shape) == 2
 
-def extrapolate2d(x, n, **kwargs):
-    assert len(x.shape) == 2
+#     n_orig, n_samples = x.shape
 
-    n_orig, n_samples = x.shape
+#     # Replicate if only one cycle presents
+#     else:
+#         # Generate cycles for extrapolation interval
+#         x_extra = make_hf_cycles_from(x, n_samples=n)
+#         x_extra = x_extra / abs(x_extra).max(1, keepdims=True)
 
-    # Replicate if only one cycle presents
-    if len(x) == 1:
-        x0 = 0
-        x_extra = np.repeat(x, n, axis=0)
-    else:
-        # Generate cycles for extrapolation interval
-        x_extra = make_hf_cycles_from(x, n_samples=n)
-        x_extra = x_extra / abs(x_extra).max(1, keepdims=True)
+#         # Estimate amplitude envelope on the extrapolation interval
+#         x0 = x.mean(-1, keepdims=True)
+#         x = x - x0
+#         a = abs(x).max(1)
+#         t = np.linspace(0, 1, n_orig)
+#         kind = kwargs.get('kind', 'linear')
+#         n_orig_flat, n_extra_flat = np.product(x.shape), np.product(
+#             x_extra.shape)
+#         t_flat = np.linspace(0, 1, n_orig_flat)
+#         a_flat = interp1d(t, a, kind=kind)(t_flat)
+#         a_extra = AutoReg(a_flat,
+#                           1).fit().predict(n_orig_flat,
+#                                            n_orig_flat + n_extra_flat - 1)
+#         a_extra = a_extra.reshape(-1, n_samples)
 
-        # Estimate amplitude envelope on the extrapolation interval
-        x0 = x.mean(-1, keepdims=True)
-        x = x - x0
-        a = abs(x).max(1)
-        t = np.linspace(0, 1, n_orig)
-        kind = kwargs.get('kind', 'linear')
-        n_orig_flat, n_extra_flat = np.product(x.shape), np.product(
-            x_extra.shape)
-        t_flat = np.linspace(0, 1, n_orig_flat)
-        a_flat = interp1d(t, a, kind=kind)(t_flat)
-        a_extra = AutoReg(a_flat,
-                          1).fit().predict(n_orig_flat,
-                                           n_orig_flat + n_extra_flat - 1)
-        a_extra = a_extra.reshape(-1, n_samples)
+#         # Apply envelope
+#         x_extra = a_extra * x_extra
 
-        # Apply envelope
-        x_extra = a_extra * x_extra
+#     # Combine original and extrapolated signals
+#     # FIXME x0 for x_extra?
+#     x = np.concatenate((x + x0, x_extra))
 
-    # Combine original and extrapolated signals
-    # FIXME x0 for x_extra?
-    x = np.concatenate((x + x0, x_extra))
-
-    return x
+#     return x
 
 
 # @staticmethod
@@ -221,36 +227,42 @@ def compute_shifts(v: np.ndarray, v0: np.ndarray) -> np.ndarray:
     return dv
 
 
-def extrapolate(x, n, x0=None, fs=None, f0=None, **kwargs):
+def extrapolate(
+    x,
+    n,
+    x0=None,
+    fs=None,
+    f0=None,
+    # **kwargs,
+):
     '''
     Main assumption: constant frequency
     '''
+    assert len(x.shape) <= 2 and len(x.shape) > 0
+
     if isinstance(n, tuple):
         a, b = n
     else:
         a, b = n - n // 2, n // 2
 
-    is_aligned = len(x.shape) == 2
+    n_orig = np.product(x.shape)
+    is_synced = len(x.shape) == 2
 
-    if is_aligned:
-        n_orig = np.product(x.shape)
+    if is_synced:
         xs = x
         da, db = 0, 0
     else:
-        n_orig = len(x)
-
         if x0 is None:
             assert fs is not None
             assert f0 is not None
-            T = int(round(fs / f0))
+            T = round(fs / f0)
             # TODO if not whole cycles (amp issue)
-            x0 = np.arange(0, len(x), T)
-            dx = np.zeros(len(x0) - 1)
+            x0 = np.arange(0, len(x) + T, T)
         else:
-            dx = compute_shifts(x, x0)
             T = round(np.diff(x0).mean())
 
         # Obtain synchronized signal with equal number of samples per cycle
+        dx = np.zeros(len(x0))
         xs = sync_cycles(x, x0, dx, T)
 
         # Compensate missing cycles
@@ -263,28 +275,55 @@ def extrapolate(x, n, x0=None, fs=None, f0=None, **kwargs):
     nb = math.ceil((b + db) / n_samples)
 
     # Generate extra cycles
-    xe = make_hf_cycles_from(xs, n_samples=na + nb)
-    xe /= abs(xe).max(1, keepdims=True)
-    xa, xb = xe[:na], xe[na:]
+    if len(xs) == 1:
+        # xm = 0
+        x = np.repeat(xs, na + nb + 1, axis=0).ravel()
+    else:
+        xe = make_hf_cycles_from(xs, n_samples=na + nb)
+        xe /= abs(xe).max(1, keepdims=True)
 
-    amp = abs(xs).max(1)
-    n_cycles = len(xs)
-    areg1 = AutoReg(amp[::-1], 1).fit()
-    areg2 = AutoReg(amp, 1).fit()
+        # TODO mean value
+        # xm = xs.mean(1, keepdims=True)
+        # xs = xs - xm
 
-    if na > 0:
-        ampa = areg1.predict(n_cycles, n_cycles + na - 1)[::-1]
-        xa = (xa * ampa[:, None])
+        n_cycles = len(xs)
+        amp = abs(xs).max(1)
+        xa, xb = xe[:na], xe[na:]
 
-    if nb > 0:
-        ampb = areg2.predict(n_cycles, n_cycles + nb - 1)
-        xb = (xb * ampb[:, None])
+        if na > 0 and len(amp) == 1:
+            ampa = amp.item() * np.ones(na)
+        elif na > 0 and len(amp) < 4:
+            # TODO if no need in linear extrapolation?
+            ca = np.polyfit(range(2), amp[:2], 1)
+            ampa = ca[0] * np.arange(-na, 0) + ca[1]
+        elif na > 0:
+            ampa = AutoReg(amp[::-1], 1).fit().predict(n_cycles,
+                                                       n_cycles + na - 1)[::-1]
+        else:
+            ampa = np.ones(0)
 
-    x = np.concatenate((xa, xs, xb)).ravel()
+        if nb > 0 and len(amp) == 1:
+            ampb = amp.item() * np.ones(nb)
+        elif nb > 0 and len(amp) < 4:
+            # TODO if no need in linear extrapolation?
+            cb = np.polyfit(range(2), amp[1:] if len(amp) > 2 else amp, 1)
+            ampb = cb[0] * np.arange(2, 2 + nb) + cb[1]
+        elif nb > 0:
+            ampb = AutoReg(amp, 1).fit().predict(n_cycles, n_cycles + nb - 1)
+        else:
+            ampb = np.ones(0)
+
+        # TODO smoother scaling
+        xa = xa * ampa[:, None]
+        xb = xb * ampb[:, None]
+
+        x = np.concatenate((xa, xs, xb))
+        x = x.ravel()
 
     # Restrict the number of samples in the final signal
-    x = x[(n_samples - a) % n_samples:]
-    x = x[:n_orig + a + b]
+    if not is_synced:
+        x = x[(n_samples - a) % n_samples:]
+        x = x[:n_orig + a + b]
 
     return x
 

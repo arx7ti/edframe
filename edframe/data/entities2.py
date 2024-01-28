@@ -149,6 +149,11 @@ class VI(Recording, BackupMixin):
 
         return 1
 
+    # @property
+    # def n_cycles(self):
+    #     if self.is_synced():
+    #         return self._dims[0]
+
     @property
     def components(self):
         if self.n_components > 1:
@@ -402,7 +407,7 @@ class VI(Recording, BackupMixin):
         return self.new(v, i, self.fs, is_synced=True, dims=dims, locs=locs)
 
     def resample(self, fs, **kwargs):
-        # TODO critical sampling rate condition 
+        # TODO critical sampling rate condition
         if fs > self.fs:
             v, i = upsample(self.data, self.fs, fs, **kwargs)
         elif fs < self.fs:
@@ -514,19 +519,31 @@ class VI(Recording, BackupMixin):
         if self.is_synced():
             dims = self._get_dims()
             v, i = self.data.reshape(2, *dims)
-            is_synced = n % dims[1] == 0
+
+            if isinstance(n, tuple):
+                is_synced = n[0] % dims[1] == 0 & n[1] % dims[1] == 0
+            else:
+                is_synced = n % dims[1] == 0
+
         else:
             v, i = self.data
             is_synced = False
 
-        _, v = extrapolate(v, n, v=v, **kwargs)
+        v = extrapolate(v.ravel(), n, fs=self.fs, f0=self.f0)
         i = pad(i.ravel(), n, **kwargs)
+
+        if is_synced and isinstance(n, tuple):
+            new_dims = sum(n) + dims[0], dims[1]
+        elif is_synced:
+            new_dims = n + dims[0], dims[1]
+        else:
+            new_dims = None
 
         return self.new(v,
                         i,
                         self.fs,
                         is_synced=is_synced,
-                        dims=self._dims,
+                        dims=new_dims,
                         locs=self.locs)
 
     def unitscale(self):
@@ -704,12 +721,10 @@ class VI(Recording, BackupMixin):
         return hash(self.data.tobytes()) & 0xFFFFFFFFFFFFFFFF
 
     def todict(self):
-        data = {'v': self.v, 'i': self.i}
-        return data
+        return {'v': self.v, 'i': self.i, 'fs': self.fs, 'f0': self.f0}
 
     def todf(self):
-        df = pd.DataFrame(self.todict())
-        return df
+        return pd.DataFrame(self.todict())
 
     def tolist(self):
         return [self.v.tolist(), self.i.tolist()]

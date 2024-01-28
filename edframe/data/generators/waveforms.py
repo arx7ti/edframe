@@ -64,9 +64,14 @@ def make_hf_cycles_from(X, n_samples=100, reg=1e-12):
     r, theta = np.abs(Zn)[:, 1], np.angle(Zn)[:, 1]
     theta[theta < 0] += 2 * np.pi
 
-    ar = AutoReg(r, 1).fit(cov_kwds={'use_correction': True})
-    corr_coef = ar.params[1]
-    cluster_std = np.sqrt(ar.sigma2)
+    if len(r) > 3:
+        ar = AutoReg(r, 1).fit(cov_kwds={'use_correction': True})
+        corr_coef = ar.params[1]
+        cluster_std = np.sqrt(ar.sigma2)
+    else:
+        corr_coef = 0 
+        cluster_std = np.std(r) 
+
     h = Z.shape[1]
 
     r = correlated_normal((n_samples, h), cluster_std, r=corr_coef, epsn=r[-1])
