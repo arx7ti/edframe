@@ -174,12 +174,10 @@ class VI(Recording, BackupMixin):
 
     @property
     def locs(self):
-        if self._locs is None and self._appliances is not None:
-            return [[0, len(self)] * len(self._appliances)]
-        elif self._locs is not None:
+        if self._locs is None:
+            return np.asarray([[0, self.n_samples] * self.n_components])
+        else:
             return self._locs
-
-        return None
 
     @feature
     def phase_shift(self):
@@ -313,47 +311,31 @@ class VI(Recording, BackupMixin):
         return self.n_samples
 
     def __getitem__(self, indexer):
-        if isinstance(indexer, tuple):
-            assert len(indexer) == 2
-            indexer, _ = indexer
-
-            if not self.is_synced():
-                raise ValueError
-
-            if isinstance(_, slice):
-                if not (_.start == _.stop == _.step == None):
-                    raise ValueError
-            elif _ != Ellipsis:
-                raise ValueError
-
-            data = self.data.reshape(2, *self._get_dims())
-            keep_synced = True
-        elif not isinstance(indexer, slice):
+        if not isinstance(indexer, slice):
             raise ValueError
+
+        if indexer.step is not None:
+            raise ValueError
+
+        a = indexer.start if indexer.start is not None else 0
+        a = a // self.cycle_size * self.cycle_size
+        b = indexer.stop if indexer.stop is not None else self.n_samples
+        b = math.ceil(b / self.cycle_size) * self.cycle_size
+
+        if a > self.n_samples or b > self.n_samples or b <= a:
+            raise ValueError
+
+        if b - a < self.cycle_size:
+            raise NotImplementedError
+
+        data = self.data[..., a:b]
+
+        if self.has_locs():
+            locs = np.clip(self.locs - a, a_min=0, a_max=self.cycle_size)
         else:
-            data = self.data
-            keep_synced = False
+            locs = None
 
-        if self.n_components > 1:
-            data = data[:, :, indexer]
-        else:
-            data = data[:, indexer]
-
-        if keep_synced:
-            dims = data.shape[-2:]
-            dims = (self.n_components, -1) if self.n_components > 1 else -1
-            data = data.reshape(2, *dims)
-        else:
-            dims = None
-
-        v, i = data
-
-        return self.new(v,
-                        i,
-                        self.fs,
-                        self.f0,
-                        is_synced=keep_synced,
-                        dims=dims)
+        return self.new(*data, self.fs, self.f0, locs=locs)
 
     def __add__(self, vi):
         return self.add(vi)
@@ -464,6 +446,11 @@ class VI(Recording, BackupMixin):
 
         return self.new(v, i, self.fs, self.f0, locs=locs)
 
+    def _adjust_by_cycle_size(self, n):
+        n = n + self.cycle_size % n
+
+        return n
+
     def _adjust_delta(self, n):
         if isinstance(n, tuple):
             a, b = n
@@ -471,10 +458,10 @@ class VI(Recording, BackupMixin):
             a, b = n - n // 2, n
 
         if a != 0:
-            a = a + self.cycle_size % a
+            a = self._adjust_by_cycle_size(a)
 
         if b != 0:
-            b = b + self.cycle_size % b
+            b = self._adjust_by_cycle_size(b)
 
         return a, b
 

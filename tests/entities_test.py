@@ -46,6 +46,19 @@ class TestVI(test.TestCase):
 
         return signatures
 
+    def test_getitem(self):
+        for vi in self.init_signatures():
+            n = np.random.randint(len(vi), size=2 * N_CHOICES)
+            for a, b in np.sort(n).reshape(-1, 2):
+                vi_ = lambda: vi[a:b]
+
+                if b == a == 0:
+                    self.assertRaises(ValueError, vi_)
+                else:
+                    vi_ = vi_()
+                    self.assertGreaterEqual(len(vi_), b - a)
+                    self.assertTrue(len(vi_) % vi.cycle_size == 0)
+
     def test_components(self):
         signatures = self.init_signatures()
 
