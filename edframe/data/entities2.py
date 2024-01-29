@@ -19,7 +19,7 @@ from pickle import HIGHEST_PROTOCOL
 from .decorators import feature, safe_mode
 from ..features import fundamental, spectrum, thd, spectral_centroid, temporal_centroid, rms
 from ..utils.exceptions import NotEnoughCycles, SingleCycleOnly, SamplingRateMismatch, MainsFrequencyMismatch
-from ..signals import FITPS, downsample, upsample, roll, fryze, budeanu, extrapolate, pad
+from ..signals import FITPS, downsample, upsample, fryze, budeanu, extrapolate, pad
 from ..utils.common import nested_dict
 
 
@@ -84,11 +84,11 @@ class VI(Recording, BackupMixin):
 
     @staticmethod
     def __iaggrule__(i):
-        return i.sum(0)
+        return i.sum((0, 1))
 
     @staticmethod
     def __vaggrule__(v):
-        return v.mean(0)
+        return v.mean((0, 1))
 
     @property
     def f0(self):
@@ -137,8 +137,12 @@ class VI(Recording, BackupMixin):
         return self.data.shape[1]
 
     @property
-    def n_samples(self):
+    def n_orthogonals(self):
         return self.data.shape[2]
+
+    @property
+    def n_samples(self):
+        return self.data.shape[3]
 
     @property
     def cycle_size(self):
@@ -149,9 +153,13 @@ class VI(Recording, BackupMixin):
         return self.n_samples // self.cycle_size
 
     @property
+    def dims(self):
+        return self.n_channels, self.n_components, self.n_orthogonals, self.n_samples
+
+    @property
     def datafold(self):
-        return self.data.reshape(self.n_channels, self.n_components,
-                                 self.n_cycles, self.cycle_size)
+        return self.data.reshape(*self.dims[:-1], self.n_cycles,
+                                 self.cycle_size)
 
     @property
     def components(self):
@@ -275,16 +283,17 @@ class VI(Recording, BackupMixin):
 
         T = math.ceil(fs / f0)
         with_components = len(v.shape) == 2
+        with_orthogonals = len(v.shape) == 3
 
-        if not with_components:
-            v, i = v[None], i[None]
+        if not with_components and not with_orthogonals:
+            v, i = v[None, None], i[None, None]
 
         # + VOLTAGE CHECK
         # Voltage should be synchronous and starting with positive semi-cycle
-        if v.shape[1] // T == 0:
+        if v.shape[-1] // T == 0:
             raise ValueError
 
-        if np.std(v[:, :T // 2]) <= 0:
+        if np.std(v[..., :T // 2]) <= 0:
             raise ValueError
         # - VOLTAGE CHECK
 
@@ -295,15 +304,7 @@ class VI(Recording, BackupMixin):
         super().__init__(data, fs, appliances=appliances, locs=locs)
 
     def __len__(self):
-        return self.data.shape[-1]
-
-    @property
-    def dims(self):
-        return self.n_samples // self.cycle_size, self.cycle_size
-
-    @property
-    def fulldims(self):
-        return 2, self.n_components, *self.dims
+        return self.n_samples
 
     def __getitem__(self, indexer):
         if isinstance(indexer, tuple):
@@ -432,101 +433,32 @@ class VI(Recording, BackupMixin):
 
         return self.new(v, i, fs, self.f0, locs=locs)
 
-    def cycle(self, mode='mean'):
-        if not self.is_synced():
-            self = self.sync()
-
-        data = self.data.reshape(2, *self._get_dims())
-
-        if mode == 'mean':
-            data = np.mean(data, axis=-2)
-        elif mode == 'median':
-            data = np.median(data, axis=-2)
-        else:
-            raise ValueError
-
-        v, i = data
-        dims = 1, v.shape[-1]
-
-        return self.new(v,
-                        i,
-                        self.fs,
-                        self.f0,
-                        is_synced=self.is_synced(),
-                        dims=dims)
-
-    def roll(self, n, outer=False):
+    def roll(self, n):
+        '''
+        cycle-wise roll 
+        '''
         if n == 0:
-            return self.new(self.__v,
-                            self.__i,
-                            self.fs,
-                            self.f0,
-                            is_synced=self.is_synced(),
-                            dims=self._dims)
+            return self.new(self.vc, self.ic, self.fs, self.f0)
 
         n = len(self) if abs(n) > len(self) else n
 
-        if outer and not self.is_synced():
-            raise ValueError
-
-        if outer:
-            *_, p = self._get_dims()
-            v, i = roll(self.data, abs(n) // p * p)
-        else:
-            v, i = self.data
-            i = roll(i, n)
+        n_cycles = n // self.cycle_size * self.cycle_size
+        v, i = np.roll(self.data, n_cycles, axis=-1)
 
         mute = np.s_[n:] if n < 0 else np.s_[:n]
-        mute = np.s_[:, mute] if self.n_components > 1 else np.s_[:n]
+        mute = np.s_[..., mute]
         i[mute] = 0
 
         locs = None
 
-        if self.has_locs():
-            locs = np.asarray(self.locs)
-            locs = np.clip(locs + n, a_min=0, a_max=len(self))
-            locs = locs.tolist()
+        # if self.has_locs():
+        #     locs = np.asarray(self.locs)
+        #     locs = np.clip(locs + n, a_min=0, a_max=len(self))
+        #     locs = locs.tolist()
 
-        return self.new(v,
-                        i,
-                        self.fs,
-                        self.f0,
-                        is_synced=self.is_synced(),
-                        dims=self._dims,
-                        locs=locs)
+        return self.new(v, i, self.fs, self.f0, locs=locs)
 
-    def extrapolate(self, n, **kwargs):
-        if self.n_components > 1:
-            raise NotImplementedError
-
-        if self.is_synced():
-            dims = self._get_dims()
-            v, i = self.data.reshape(2, *dims)
-            is_synced = n % dims[1] == 0
-        else:
-            v, i = self.data
-            is_synced = False
-
-        v, i = extrapolate(i, n, v=v, **kwargs)
-        locs = None
-
-        if self.has_locs():
-            locs = np.asarray(self.locs)
-            locs[:, 1] += n
-            locs = locs.tolist()
-
-        return self.new(v,
-                        i,
-                        self.fs,
-                        self.f0,
-                        is_synced=is_synced,
-                        dims=self._dims,
-                        locs=locs)
-
-    def pad(self, n, **kwargs):
-        if self.n_components > 1:
-            raise NotImplementedError
-
+    def _adjust_delta(self, n):
         if isinstance(n, tuple):
             a, b = n
         else:
@@ -538,49 +470,77 @@ class VI(Recording, BackupMixin):
         if b != 0:
             b = b + self.cycle_size % b
 
+        return a, b
+
+    def extrapolate(self, n):
+        locs = None
         V, I = [], []
+        n = self._adjust_delta(n)
+        dims = self.n_components, self.n_orthogonals, -1
+
+        for vo, io in zip(*self.data):
+            for v, i in zip(vo, io):
+                v = extrapolate(v, n, fs=self.fs, f0=self.f0)
+                i = extrapolate(i, n, fs=self.fs, f0=self.f0)
+                V.append(v), I.append(i)
+
+        v, i = np.stack(V), np.stack(I)
+        v, i = v.reshape(dims), i.reshape(*dims)
+
+        # if self.has_locs():
+        #     locs = np.asarray(self.locs)
+        #     locs[:, 1] += n
+        #     locs = locs.tolist()
+
+        return self.new(v, i, self.fs, self.f0, locs=locs)
+
+    def pad(self, n, **kwargs):
+        V, I = [], []
+        n = self._adjust_delta(n)
+        dims = self.n_components, self.n_orthogonals, -1
 
         for v, i in zip(*self.data):
-            v = extrapolate(v.ravel(), (a, b), fs=self.fs, f0=self.f0)
-            i = pad(i.ravel(), (a, b), **kwargs)
+            v = extrapolate(v.ravel(), n, fs=self.fs, f0=self.f0)
+            i = pad(i.ravel(), n, **kwargs)
             V.append(v), I.append(i)
 
         v, i = np.stack(V), np.stack(I)
+        v, i = v.reshape(dims), i.reshape(*dims)
 
         return self.new(v, i, self.fs, self.f0, locs=self.locs)
 
+    def cycle(self, mode='mean'):
+        if mode == 'mean':
+            v, i = np.mean(self.datafold, axis=-2)
+        elif mode == 'median':
+            v, i = np.median(self.datafold, axis=-2)
+        else:
+            raise ValueError
+
+        return self.new(v, i, self.fs, self.f0)
+
     def unitscale(self):
-        v, i = self.data
-        i = i / np.abs(self.i).max()
+        v, i = self.data / abs(self.data).max(-1, keepdims=True)
 
-        return self.new(v,
-                        i,
-                        self.fs,
-                        self.f0,
-                        is_synced=self.is_synced(),
-                        dims=self._dims)
-
-    def steady_state(self):
-        # vm = np.median(abs(self.v))
-        # im = np.median(abs(self.i))
-        raise NotImplementedError
+        return self.new(v, i, self.fs, self.f0)
 
     def fryze(self):
+        # TODO components?
         i_a, i_r = fryze(*self.data)
-        via = self.new(self.__v,
-                       i_a,
-                       self.fs,
-                       self.f0,
-                       is_synced=self.is_synced(),
-                       dims=self._dims)
-        vir = self.new(self.__v,
-                       i_r,
-                       self.fs,
-                       self.f0,
-                       is_synced=self.is_synced(),
-                       dims=self._dims)
+        via = self.new(self.vc, i_a, self.fs, self.f0)
+        vir = self.new(self.vc, i_r, self.fs, self.f0)
 
         return via, vir
+
+    def budeanu(self):
+        v, i = self.data
+        ia, iq, id = budeanu(v, i)
+
+        a = self.new(v, ia, self.fs, self.f0)
+        q = self.new(v, iq, self.fs, self.f0)
+        d = self.new(v, id, self.fs, self.f0)
+
+        return a, q, d
 
     @staticmethod
     def _sine_waveform(amp, f0, fs, phase=0, dt=None, n=None):
@@ -618,31 +578,6 @@ class VI(Recording, BackupMixin):
 
         # TODO check dims are needed for all synced
         return cls(v, i, fs=fs, is_synced=False)
-
-    def budeanu(self):
-        v, i = self._data
-        ia, iq, id = budeanu(v, i)
-
-        a = self.new(v,
-                     ia,
-                     self.fs,
-                     self.f0,
-                     is_synced=self.is_synced(),
-                     dims=self._get_dims())
-        q = self.new(v,
-                     iq,
-                     self.fs,
-                     self.f0,
-                     is_synced=self.is_synced(),
-                     dims=self._get_dims())
-        d = self.new(v,
-                     id,
-                     self.fs,
-                     self.f0,
-                     is_synced=self.is_synced(),
-                     dims=self._get_dims())
-
-        return a, q, d
 
     def features(self, features=None, format='list', **kwargs):
         if features is None:

@@ -103,9 +103,9 @@ def pad(
     return x
 
 
-def roll(x: np.ndarray, n: int, axis: int = -1) -> np.ndarray:
-    x = np.roll(x, n, axis=axis)
-    return x
+# def roll(x: np.ndarray, n: int, axis: int = -1) -> np.ndarray:
+#     x = np.roll(x, n, axis=axis)
+#     return x
 
 
 def crop(x: np.ndarray, a: int, b: int, axis=-1) -> np.ndarray:
