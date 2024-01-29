@@ -169,6 +169,10 @@ class VI(Recording, BackupMixin):
         ]
 
     @property
+    def orthogonality(self):
+        return self._orthogonality
+
+    @property
     def locs(self):
         if self._locs is None and self._appliances is not None:
             return [[0, len(self)] * len(self._appliances)]
@@ -278,6 +282,7 @@ class VI(Recording, BackupMixin):
         f0,
         appliances=None,
         locs=None,
+        **kwargs,
     ) -> None:
         assert v.shape == i.shape
 
@@ -300,6 +305,7 @@ class VI(Recording, BackupMixin):
         data = np.stack((v, i))
         self._f0 = f0
         self._T = T
+        self._orthogonality = kwargs.get('orthogonality', None)
 
         super().__init__(data, fs, appliances=appliances, locs=locs)
 
@@ -501,7 +507,7 @@ class VI(Recording, BackupMixin):
 
         for vo, io in zip(*self.data):
             for v, i in zip(vo, io):
-                v = extrapolate(v.ravel(), n, fs=self.fs, f0=self.f0)
+                v = extrapolate(v, n, fs=self.fs, f0=self.f0)
                 i = pad(i.ravel(), n, **kwargs)
                 V.append(v), I.append(i)
 
@@ -526,18 +532,28 @@ class VI(Recording, BackupMixin):
         return self.new(v, i, self.fs, self.f0)
 
     def fryze(self):
-        i_a, i_r = fryze(*self.data)
-        i = np.concatenate((i_a, i_r), axis=1)
-        v = np.repeat(self.vc, 2, axis=1)
+        v, i = self.data
 
-        return self.new(v, i, self.fs, self.f0)
+        if self.n_orthogonals > 1:
+            v, i = v[:, 0, None], i.sum(1, keepdims=True)
+
+        i_a, i_r = fryze(v, i)
+        i = np.concatenate((i_a, i_r), axis=1)
+        v = np.repeat(v, 2, axis=1)
+
+        return self.new(v, i, self.fs, self.f0, orthogonality='Fryze')
 
     def budeanu(self):
-        i_a, i_q, i_d = budeanu(*self.data)
-        i = np.concatenate((i_a, i_q, i_d), axis=1)
-        v = np.repeat(self.vc, 3, axis=1)
+        v, i = self.data
 
-        return self.new(v, i, self.fs, self.f0)
+        if self.n_orthogonals > 1:
+            v, i = v[:, 0, None], i.sum(1, keepdims=True)
+
+        i_a, i_q, i_d = budeanu(v, i)
+        i = np.concatenate((i_a, i_q, i_d), axis=1)
+        v = np.repeat(v, 3, axis=1)
+
+        return self.new(v, i, self.fs, self.f0, orthogonality='Budeanu')
 
     @staticmethod
     def _sine_waveform(amp, f0, fs, phase=0, dt=None, n=None):
