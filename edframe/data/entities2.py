@@ -499,10 +499,11 @@ class VI(Recording, BackupMixin):
         n = self._adjust_delta(n)
         dims = self.n_components, self.n_orthogonals, -1
 
-        for v, i in zip(*self.data):
-            v = extrapolate(v.ravel(), n, fs=self.fs, f0=self.f0)
-            i = pad(i.ravel(), n, **kwargs)
-            V.append(v), I.append(i)
+        for vo, io in zip(*self.data):
+            for v, i in zip(vo, io):
+                v = extrapolate(v.ravel(), n, fs=self.fs, f0=self.f0)
+                i = pad(i.ravel(), n, **kwargs)
+                V.append(v), I.append(i)
 
         v, i = np.stack(V), np.stack(I)
         v, i = v.reshape(dims), i.reshape(*dims)
@@ -525,22 +526,18 @@ class VI(Recording, BackupMixin):
         return self.new(v, i, self.fs, self.f0)
 
     def fryze(self):
-        # TODO components?
         i_a, i_r = fryze(*self.data)
-        via = self.new(self.vc, i_a, self.fs, self.f0)
-        vir = self.new(self.vc, i_r, self.fs, self.f0)
+        i = np.concatenate((i_a, i_r), axis=1)
+        v = np.repeat(self.vc, 2, axis=1)
 
-        return via, vir
+        return self.new(v, i, self.fs, self.f0)
 
     def budeanu(self):
-        v, i = self.data
-        ia, iq, id = budeanu(v, i)
+        i_a, i_q, i_d = budeanu(*self.data)
+        i = np.concatenate((i_a, i_q, i_d), axis=1)
+        v = np.repeat(self.vc, 3, axis=1)
 
-        a = self.new(v, ia, self.fs, self.f0)
-        q = self.new(v, iq, self.fs, self.f0)
-        d = self.new(v, id, self.fs, self.f0)
-
-        return a, q, d
+        return self.new(v, i, self.fs, self.f0)
 
     @staticmethod
     def _sine_waveform(amp, f0, fs, phase=0, dt=None, n=None):

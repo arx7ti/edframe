@@ -159,16 +159,14 @@ class TestVI(test.TestCase):
 
     def test_fryze(self):
         for vi in self.init_signatures():
-            a, r = vi.fryze()
-            vi_ = a + r
+            vi_ = vi.fryze()
 
             self.assertTrue(np.allclose(vi_.i, vi.i))
             self.assertTrue(np.allclose(vi_.v, vi.v))
 
     def test_budeanu(self):
         for vi in self.init_signatures():
-            a, q, d = vi.budeanu()
-            vi_ = a + q + d
+            vi_ = vi.budeanu()
 
             self.assertTrue(np.allclose(vi_.i, vi.i))
             self.assertTrue(np.allclose(vi_.v, vi.v))
