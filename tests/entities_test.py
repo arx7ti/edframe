@@ -21,7 +21,7 @@ rng = np.random.RandomState(RANDOM_STATE)
 
 class TestVI(test.TestCase):
 
-    def init_signatures(self):
+    def init_signatures(self, include_locs=False):
         signatures = []
         combs = it.product(F0, FS, N_CYCLES)
 
@@ -42,22 +42,37 @@ class TestVI(test.TestCase):
             v = np.sin(2 * np.pi * f0 * t) + V_DC_OFFSET
             V = np.stack(np.repeat(v[None], len(I), axis=0))
 
-            signatures.extend([VI(v, i, fs, f0) for v, i in zip(V, I)])
+            if include_locs:
+                a = np.random.randint(0, I.shape[1] - 1)
+                b = np.random.randint(a + 1, I.shape[1])
+                locs = [[a, b]]
+            else:
+                locs = None
+
+            signatures.extend(
+                [VI(v, i, fs, f0, locs=locs) for v, i in zip(V, I)])
 
         return signatures
 
     def test_getitem(self):
-        for vi in self.init_signatures():
-            n = np.random.randint(len(vi), size=2 * N_CHOICES)
+        for vi in self.init_signatures(include_locs=True):
+            n = np.random.randint(0, len(vi), size=2 * N_CHOICES)
+
             for a, b in np.sort(n).reshape(-1, 2):
                 vi_ = lambda: vi[a:b]
 
-                if b == a == 0:
+                if b <= a:
                     self.assertRaises(ValueError, vi_)
                 else:
                     vi_ = vi_()
-                    self.assertGreaterEqual(len(vi_), b - a)
-                    self.assertTrue(len(vi_) % vi.cycle_size == 0)
+
+                    if (a >= vi.locs.T[1]).any() or (b <= vi.locs.T[0]).any():
+                        self.assertLess(len(vi_.locs), len(vi.locs))
+
+                    if vi_.n_components > 0:
+                        self.assertGreaterEqual(len(vi_), b - a)
+                        self.assertTrue(len(vi_) % vi.cycle_size == 0)
+                        self.assertAlmostEqual(vi_.i.sum(), vi.i[a:b].sum())
 
     def test_components(self):
         signatures = self.init_signatures()

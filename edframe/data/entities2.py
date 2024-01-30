@@ -39,7 +39,7 @@ class Recording:
 
     def __init__(self, data, fs, appliances=None, locs=None) -> None:
         if not hasattr(appliances, '__len__'):
-            appliances = [appliances]
+            appliances = [appliances] * data.shape[1]
 
         if appliances is not None and locs is not None:
             assert len(appliances) == len(locs)
@@ -47,7 +47,7 @@ class Recording:
         self._data = data
         self._fs = fs
         self._appliances = appliances
-        self._locs = locs
+        self._locs = None if locs is None else np.asarray(locs)
         self._require_components = True
 
 
@@ -317,21 +317,40 @@ class VI(Recording, BackupMixin):
         if indexer.step is not None:
             raise ValueError
 
-        a = indexer.start if indexer.start is not None else 0
-        a = a // self.cycle_size * self.cycle_size
-        b = indexer.stop if indexer.stop is not None else self.n_samples
-        b = math.ceil(b / self.cycle_size) * self.cycle_size
+        a0 = indexer.start if indexer.start is not None else 0
+        a = a0 // self.cycle_size * self.cycle_size
+        b0 = indexer.stop if indexer.stop is not None else self.n_samples
+        b = math.ceil(b0 / self.cycle_size) * self.cycle_size
 
-        if a > self.n_samples or b > self.n_samples or b <= a:
+        if b0 <= a0:
+            raise ValueError
+
+        if a > self.n_samples or b > self.n_samples:
             raise ValueError
 
         if b - a < self.cycle_size:
             raise NotImplementedError
 
-        data = self.data[..., a:b]
+        data = self.data[..., a:b].copy()
+
+        if a0 % self.cycle_size > 0:
+            data[1, ..., :a0 % self.cycle_size] = 0
+
+        if b0 % self.cycle_size > 0:
+            data[1, ..., data.shape[-1] -
+                 (self.cycle_size - b0 % self.cycle_size):] = 0
 
         if self.has_locs():
-            locs = np.clip(self.locs - a, a_min=0, a_max=self.cycle_size)
+            xa, xb = self.locs.T
+
+            cdrop = np.argwhere((a0 >= xb) | (b0 <= xa)).ravel()
+
+            xa = np.maximum(xa - a0, 0)
+            xb = np.minimum(xa + b0 - a0, xb - a0)
+            locs = np.stack((xa, xb)).T
+
+            locs = np.delete(locs, cdrop, axis=0)
+            data = np.delete(data, cdrop, axis=1)
         else:
             locs = None
 
@@ -365,7 +384,7 @@ class VI(Recording, BackupMixin):
         return self.new(v, i, self.fs, self.f0)
 
     def has_locs(self):
-        return self.locs is not None
+        return self._locs is not None
 
     def is_empty(self):
         return len(self) == 0
@@ -415,7 +434,7 @@ class VI(Recording, BackupMixin):
         locs = None
 
         if self.has_locs():
-            locs = np.asarray(self.locs)
+            # locs = np.asarray(self.locs)
             locs = np.ceil(locs * fs / self.fs).astype(int)
             locs = locs.tolist()
 
