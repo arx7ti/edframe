@@ -22,6 +22,8 @@ rng = np.random.RandomState(RANDOM_STATE)
 class TestVI(test.TestCase):
 
     def init_signatures(self, include_locs=False):
+        # TODO half with locs
+        # TODO with components
         signatures = []
         combs = it.product(F0, FS, N_CYCLES)
 
@@ -70,6 +72,7 @@ class TestVI(test.TestCase):
                         self.assertLess(len(vi_.locs), len(vi.locs))
 
                     if vi_.n_components > 0:
+                        self.assertEqual(len(vi_) % vi.cycle_size, 0)
                         self.assertGreaterEqual(len(vi_), b - a)
                         self.assertTrue(len(vi_) % vi.cycle_size == 0)
                         self.assertAlmostEqual(vi_.i.sum(), vi.i[a:b].sum())
@@ -104,6 +107,8 @@ class TestVI(test.TestCase):
                 self.assertTrue(np.allclose(vi_1.v, VI.__vaggrule__(V)))
                 self.assertTrue(np.allclose(vi_1.i, VI.__iaggrule__(I)))
 
+                # TODO locs
+
     def test_resample(self):
         for vi in self.init_signatures():
             for fs in rng.choice(range(1000, 10000), N_CHOICES, replace=False):
@@ -119,8 +124,10 @@ class TestVI(test.TestCase):
                 else:
                     self.assertEqual(vi_.i.shape, vi.i.shape)
 
+                # TODO locs
+
     def test_roll(self):
-        for vi in self.init_signatures():
+        for vi in self.init_signatures(include_locs=True):
             for n in rng.choice(100, N_CHOICES, replace=False):
                 vi_ = vi.roll(n)
 
@@ -140,27 +147,53 @@ class TestVI(test.TestCase):
                 if n > 1:
                     self.assertNotEqual(vi_.vc[mute].std(), 0)
 
+
     def test_pad(self):
-        for vi in self.init_signatures():
+        for vi in self.init_signatures(include_locs=True):
             for n in rng.choice(100, N_CHOICES, replace=False):
                 vi_ = vi.pad(n)
-                n = vi._adjust_delta(n)
+                a, b = vi._adjust_delta(n)
 
-                self.assertEqual(len(vi_), len(vi) + sum(n))
+                self.assertEqual(len(vi_), len(vi) + a + b)
                 self.assertEqual(vi_.cycle_size, vi.cycle_size)
                 self.assertEqual(vi_.fs, vi.fs)
                 self.assertEqual(vi_.f0, vi.f0)
+
+                self.assertGreaterEqual(vi_.n_components, 1)
+                self.assertEqual(len(vi_), len(vi) + a + b)
+                self.assertEqual(a % vi_.cycle_size, 0)
+                self.assertEqual(b % vi_.cycle_size, 0)
+                self.assertEqual(len(vi_) % vi.cycle_size, 0)
+                self.assertAlmostEqual(vi_.i.sum(), vi.i.sum())
+                self.assertEqual(vi_.locs.min() - vi.locs.min(), a)
+                self.assertEqual(vi_.locs.max() - vi.locs.max(), a)
 
     def test_extrapolate(self):
-        for vi in self.init_signatures():
+        for vi in self.init_signatures(include_locs=True):
             for n in rng.choice(100, N_CHOICES, replace=False):
                 vi_ = vi.extrapolate(n)
-                n = vi._adjust_delta(n)
+                a, b = vi._adjust_delta(n)
 
-                self.assertEqual(len(vi_), len(vi) + sum(n))
+                self.assertEqual(len(vi_), len(vi) + a + b)
                 self.assertEqual(vi_.cycle_size, vi.cycle_size)
                 self.assertEqual(vi_.fs, vi.fs)
                 self.assertEqual(vi_.f0, vi.f0)
+
+                self.assertGreaterEqual(vi_.n_components, 1)
+                self.assertEqual(len(vi_), len(vi) + a + b)
+                self.assertEqual(a % vi_.cycle_size, 0)
+                self.assertEqual(b % vi_.cycle_size, 0)
+                self.assertEqual(len(vi_) % vi.cycle_size, 0)
+
+                dt0 = np.diff(vi.locs, axis=1)
+                dt1 = np.diff(vi_.locs, axis=1)
+                ids = np.argwhere(dt1 != dt0).ravel()
+
+                self.assertTrue(all([d1 >= d0 for d0, d1 in zip(dt0, dt1)]))
+
+                for i in ids:
+                    self.assertEqual(vi_.locs[i][0] - vi.locs[i][0], a)
+                    self.assertEqual(vi_.locs[i][1] - vi.locs[i][1], b + a)
 
     def test_cycle(self):
         for vi in self.init_signatures():
@@ -174,6 +207,7 @@ class TestVI(test.TestCase):
             self.assertEqual(vi_.cycle_size, vi.cycle_size)
             self.assertEqual(vi_.fs, vi.fs)
             self.assertEqual(vi_.f0, vi.f0)
+            # TODO locs
 
     def test_unitscale(self):
         for vi in self.init_signatures():
@@ -184,6 +218,7 @@ class TestVI(test.TestCase):
             self.assertNotEqual(I.mean(), 1)
             self.assertLessEqual(abs(vi_.i).max(), 1)
             self.assertLessEqual(abs(vi_.v).max(), 1)
+            # TODO locs
 
     def test_fryze(self):
         for vi in self.init_signatures():
@@ -191,6 +226,7 @@ class TestVI(test.TestCase):
 
             self.assertTrue(np.allclose(vi_.i, vi.i))
             self.assertTrue(np.allclose(vi_.v, vi.v))
+            # TODO locs
 
     def test_budeanu(self):
         for vi in self.init_signatures():
@@ -198,6 +234,7 @@ class TestVI(test.TestCase):
 
             self.assertTrue(np.allclose(vi_.i, vi.i))
             self.assertTrue(np.allclose(vi_.v, vi.v))
+            # TODO locs
 
 
 if __name__ == '__main__':

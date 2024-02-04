@@ -13,6 +13,7 @@ from inspect import isfunction
 from collections import defaultdict
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import MultiLabelBinarizer
+from statsmodels.tools.sm_exceptions import MissingDataError
 
 from datetime import datetime
 from pickle import HIGHEST_PROTOCOL
@@ -177,7 +178,7 @@ class VI(Recording, BackupMixin):
         if self._locs is None:
             return np.asarray([[0, self.n_samples] * self.n_components])
         else:
-            return self._locs
+            return self._locs.copy()
 
     @feature
     def phase_shift(self):
@@ -466,7 +467,7 @@ class VI(Recording, BackupMixin):
         return self.new(v, i, self.fs, self.f0, locs=locs)
 
     def _adjust_by_cycle_size(self, n):
-        n = n + self.cycle_size % n
+        n += self.cycle_size - n % self.cycle_size
 
         return n
 
@@ -485,28 +486,36 @@ class VI(Recording, BackupMixin):
         return a, b
 
     def extrapolate(self, n):
-        locs = None
         V, I = [], []
         n = self._adjust_delta(n)
+        locs = self.locs if self.has_locs() else None
         dims = self.n_components, self.n_orthogonals, -1
 
-        for vo, io in zip(*self.data):
+        for k, (vo, io) in enumerate(zip(*self.data)):
             for v, i in zip(vo, io):
                 v = extrapolate(v, n, fs=self.fs, f0=self.f0)
-                i = extrapolate(i, n, fs=self.fs, f0=self.f0)
+
+                try:
+                    i = extrapolate(i, n, fs=self.fs, f0=self.f0)
+
+                except MissingDataError:
+                    i = pad(i, n)
+
+                    if self.has_locs():
+                        locs[k] += n[0]
+                else:
+                    if self.has_locs():
+                        locs[k] += n[0]
+                        locs[k][1] += n[1]
+
                 V.append(v), I.append(i)
 
         v, i = np.stack(V), np.stack(I)
-        v, i = v.reshape(dims), i.reshape(*dims)
-
-        # if self.has_locs():
-        #     locs = np.asarray(self.locs)
-        #     locs[:, 1] += n
-        #     locs = locs.tolist()
+        v, i = v.reshape(*dims), i.reshape(*dims)
 
         return self.new(v, i, self.fs, self.f0, locs=locs)
 
-    def pad(self, n, **kwargs):
+    def pad(self, n):
         V, I = [], []
         n = self._adjust_delta(n)
         dims = self.n_components, self.n_orthogonals, -1
@@ -514,13 +523,18 @@ class VI(Recording, BackupMixin):
         for vo, io in zip(*self.data):
             for v, i in zip(vo, io):
                 v = extrapolate(v, n, fs=self.fs, f0=self.f0)
-                i = pad(i.ravel(), n, **kwargs)
+                i = pad(i, n)
                 V.append(v), I.append(i)
 
         v, i = np.stack(V), np.stack(I)
-        v, i = v.reshape(dims), i.reshape(*dims)
+        v, i = v.reshape(*dims), i.reshape(*dims)
 
-        return self.new(v, i, self.fs, self.f0, locs=self.locs)
+        if self.has_locs():
+            locs = self.locs + n[0]
+        else:
+            locs = None
+
+        return self.new(v, i, self.fs, self.f0, locs=locs)
 
     def cycle(self, mode='mean'):
         if mode == 'mean':
