@@ -72,6 +72,8 @@ class TestVI(test.TestCase):
                         self.assertLess(len(vi_.locs), len(vi.locs))
 
                     if vi_.n_components > 0:
+                        self.assertGreaterEqual(vi_.locs.min(), 0)
+                        self.assertLessEqual(vi_.locs.max(), vi_.n_samples)
                         self.assertEqual(len(vi_) % vi.cycle_size, 0)
                         self.assertGreaterEqual(len(vi_), b - a)
                         self.assertTrue(len(vi_) % vi.cycle_size == 0)
@@ -110,7 +112,7 @@ class TestVI(test.TestCase):
                 # TODO locs
 
     def test_resample(self):
-        for vi in self.init_signatures():
+        for vi in self.init_signatures(include_locs=True):
             for fs in rng.choice(range(1000, 10000), N_CHOICES, replace=False):
                 vi_ = vi.resample(fs)
                 self.assertEqual(vi_.fs, fs)
@@ -124,11 +126,15 @@ class TestVI(test.TestCase):
                 else:
                     self.assertEqual(vi_.i.shape, vi.i.shape)
 
-                # TODO locs
+                self.assertGreaterEqual(vi_.locs.min(), 0)
+                self.assertLessEqual(vi_.locs.max(), vi_.n_samples)
+                print(vi_.locs[:, 0], vi_.locs[:, 1])
+                self.assertTrue((vi_.locs[:, 1] > vi_.locs[:, 0]).all())
+                self.assertFalse(np.any(vi_.locs[:, 1] == vi_.locs[:, 0]))
 
     def test_roll(self):
         for vi in self.init_signatures(include_locs=True):
-            for n in rng.choice(100, N_CHOICES, replace=False):
+            for n in rng.choice(len(vi) + 1, N_CHOICES, replace=False):
                 vi_ = vi.roll(n)
 
                 if n > 0:
@@ -147,6 +153,16 @@ class TestVI(test.TestCase):
                 if n > 1:
                     self.assertNotEqual(vi_.vc[mute].std(), 0)
 
+                self.assertGreaterEqual(vi_.locs.min(), 0)
+                self.assertLessEqual(vi_.locs.max(), vi_.n_samples)
+
+                dt0 = np.diff(vi.locs, axis=1)
+                dt1 = np.diff(vi_.locs, axis=1)
+                ids = np.argwhere(dt0 == dt1).ravel()
+
+                for i in ids:
+                    self.assertEqual(vi_.locs[i][0] - vi.locs[i][0], n)
+                    self.assertEqual(vi_.locs[i][1] - vi.locs[i][1], n)
 
     def test_pad(self):
         for vi in self.init_signatures(include_locs=True):
@@ -165,6 +181,8 @@ class TestVI(test.TestCase):
                 self.assertEqual(b % vi_.cycle_size, 0)
                 self.assertEqual(len(vi_) % vi.cycle_size, 0)
                 self.assertAlmostEqual(vi_.i.sum(), vi.i.sum())
+                self.assertGreaterEqual(vi_.locs.min(), 0)
+                self.assertLessEqual(vi_.locs.max(), vi_.n_samples)
                 self.assertEqual(vi_.locs.min() - vi.locs.min(), a)
                 self.assertEqual(vi_.locs.max() - vi.locs.max(), a)
 
@@ -189,6 +207,8 @@ class TestVI(test.TestCase):
                 dt1 = np.diff(vi_.locs, axis=1)
                 ids = np.argwhere(dt1 != dt0).ravel()
 
+                self.assertGreaterEqual(vi_.locs.min(), 0)
+                self.assertLessEqual(vi_.locs.max(), vi_.n_samples)
                 self.assertTrue(all([d1 >= d0 for d0, d1 in zip(dt0, dt1)]))
 
                 for i in ids:

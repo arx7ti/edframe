@@ -82,6 +82,7 @@ class VI(Recording, BackupMixin):
     '''
     Assumes a whole number of cycles and synchronized voltage 
     '''
+    # TODO empty signal
 
     @staticmethod
     def __iaggrule__(i):
@@ -318,6 +319,7 @@ class VI(Recording, BackupMixin):
         if indexer.step is not None:
             raise ValueError
 
+        locs = None
         a0 = indexer.start if indexer.start is not None else 0
         a = a0 // self.cycle_size * self.cycle_size
         b0 = indexer.stop if indexer.stop is not None else self.n_samples
@@ -352,8 +354,7 @@ class VI(Recording, BackupMixin):
 
             locs = np.delete(locs, cdrop, axis=0)
             data = np.delete(data, cdrop, axis=1)
-        else:
-            locs = None
+            locs = np.clip(locs, a_min=0, a_max=data.shape[-1])
 
         return self.new(*data, self.fs, self.f0, locs=locs)
 
@@ -422,22 +423,28 @@ class VI(Recording, BackupMixin):
 
     def resample(self, fs, **kwargs):
         # TODO critical sampling rate condition
-        Tn = math.ceil(fs / self.f0)
-        n = self.n_cycles * Tn
 
-        if fs > self.fs:
-            v, i = upsample(self.data, n, **kwargs)
-        elif fs < self.fs:
-            v, i = downsample(self.data, n)
-        else:
-            v, i = self.data
+        if fs == self.fs:
+            return self.copy()
 
         locs = None
+        Tn = math.ceil(fs / self.fs * self.cycle_size)
+        # HOW IT AFFECTS DATAFOLD?
+
+        if fs > self.fs:
+            v, i = upsample(self.datafold, Tn, **kwargs)
+        else:
+            v, i = downsample(self.datafold, Tn)
+
+        dims = self.n_components, self.n_orthogonals, -1
+        v, i = v.reshape(*dims), i.reshape(*dims)
+        assert v.shape[-1] % Tn == 0
 
         if self.has_locs():
-            # locs = np.asarray(self.locs)
-            locs = np.ceil(locs * fs / self.fs).astype(int)
-            locs = locs.tolist()
+            locs = self.locs * fs / self.fs
+            locs[:, 0], locs[:, 1] = np.floor(locs[:, 0]), np.ceil(locs[:, 1])
+            locs = locs.astype(int)
+            locs = np.clip(locs, a_min=0, a_max=v.shape[-1])
 
         return self.new(v, i, fs, self.f0, locs=locs)
 
@@ -448,6 +455,7 @@ class VI(Recording, BackupMixin):
         if n == 0:
             return self.new(self.vc, self.ic, self.fs, self.f0)
 
+        locs = None
         n = len(self) if abs(n) > len(self) else n
 
         n_cycles = n // self.cycle_size * self.cycle_size
@@ -457,12 +465,8 @@ class VI(Recording, BackupMixin):
         mute = np.s_[..., mute]
         i[mute] = 0
 
-        locs = None
-
-        # if self.has_locs():
-        #     locs = np.asarray(self.locs)
-        #     locs = np.clip(locs + n, a_min=0, a_max=len(self))
-        #     locs = locs.tolist()
+        if self.has_locs():
+            locs = np.clip(self.locs + n, a_min=0, a_max=self.n_samples)
 
         return self.new(v, i, self.fs, self.f0, locs=locs)
 
@@ -513,9 +517,13 @@ class VI(Recording, BackupMixin):
         v, i = np.stack(V), np.stack(I)
         v, i = v.reshape(*dims), i.reshape(*dims)
 
+        if self.has_locs():
+            locs = np.clip(locs, a_min=0, a_max=v.shape[-1])
+
         return self.new(v, i, self.fs, self.f0, locs=locs)
 
     def pad(self, n):
+        locs = None
         V, I = [], []
         n = self._adjust_delta(n)
         dims = self.n_components, self.n_orthogonals, -1
@@ -531,8 +539,7 @@ class VI(Recording, BackupMixin):
 
         if self.has_locs():
             locs = self.locs + n[0]
-        else:
-            locs = None
+            locs = np.clip(locs, a_min=0, a_max=v.shape[-1])
 
         return self.new(v, i, self.fs, self.f0, locs=locs)
 
