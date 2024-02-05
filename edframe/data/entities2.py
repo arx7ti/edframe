@@ -85,12 +85,12 @@ class VI(Recording, BackupMixin):
     # TODO empty signal
 
     @staticmethod
-    def __iaggrule__(i):
-        return i.sum((0, 1))
+    def __iaggrule__(i, keepdims=False):
+        return i.sum((0, 1), keepdims=keepdims)
 
     @staticmethod
-    def __vaggrule__(v):
-        return v.mean((0, 1))
+    def __vaggrule__(v, keepdims=False):
+        return v.mean((0, 1), keepdims=keepdims)
 
     @property
     def f0(self):
@@ -378,12 +378,14 @@ class VI(Recording, BackupMixin):
         data1, data2 = self.data, vi.data
         v, i = np.concatenate((data1, data2), axis=1)
 
-        if not self._require_components or not vi._require_components:
-            v = self.__vaggrule__(v)
-            i = self.__iaggrule__(i)
+        if self._require_components and vi._require_components:
+            locs = np.concatenate((self.locs, vi.locs)) 
+        else:
+            v = self.__vaggrule__(v, keepdims=True)
+            i = self.__iaggrule__(i, keepdims=True)
+            locs = None
 
-        # TODO locs
-        return self.new(v, i, self.fs, self.f0)
+        return self.new(v, i, self.fs, self.f0, locs=locs)
 
     def has_locs(self):
         return self._locs is not None

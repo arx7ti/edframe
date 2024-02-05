@@ -2,6 +2,7 @@ import math
 import numpy as np
 import itertools as it
 import unittest as test
+from functools import reduce
 
 from edframe.data.entities2 import VI
 from edframe.data.generators import make_hf_cycles, make_oscillations
@@ -21,7 +22,7 @@ rng = np.random.RandomState(RANDOM_STATE)
 
 class TestVI(test.TestCase):
 
-    def init_signatures(self, include_locs=False):
+    def init_signatures(self, include_locs=False, with_components=False):
         # TODO half with locs
         # TODO with components
         signatures = []
@@ -38,7 +39,6 @@ class TestVI(test.TestCase):
                                      f0=f0,
                                      dt=dt,
                                      h_loc=h_loc)
-            # I /= abs(I).max(-1, keepdims=True)
 
             t = np.linspace(0, dt, I.shape[1])
             v = np.sin(2 * np.pi * f0 * t) + V_DC_OFFSET
@@ -51,8 +51,22 @@ class TestVI(test.TestCase):
             else:
                 locs = None
 
-            signatures.extend(
-                [VI(v, i, fs, f0, locs=locs) for v, i in zip(V, I)])
+            signatures_ = [VI(v, i, fs, f0, locs=locs) for v, i in zip(V, I)]
+
+            if with_components:
+                for n_components in N_COMPONENTS:
+                    replace = n_components > len(signatures_)
+                    n_signatures = len(signatures_) / len(N_COMPONENTS)
+
+                    for _ in range(math.ceil(n_signatures)):
+                        combs_ = rng.choice(len(signatures_),
+                                            n_components,
+                                            replace=replace)
+                        combs_ = [signatures_[i] for i in combs_]
+                        signatures.append(combs_)
+            else:
+                signatures.extend(
+                    [VI(v, i, fs, f0, locs=locs) for v, i in zip(V, I)])
 
         return signatures
 
@@ -80,36 +94,46 @@ class TestVI(test.TestCase):
                         self.assertAlmostEqual(vi_.i.sum(), vi.i[a:b].sum())
 
     def test_components(self):
-        signatures = self.init_signatures()
+        signatures = self.init_signatures(include_locs=True)
 
         for n_components in N_COMPONENTS:
             replace = n_components > len(signatures)
             combs = rng.choice(len(signatures), n_components, replace=replace)
             combs = [signatures[i] for i in combs]
 
-            with self.assertRaises(
-                (SamplingRateMismatch, MainsFrequencyMismatch)):
-                vi_1 = sum(combs)
-                vi_2 = combs[0]
+            if len(set([x.fs for x in combs
+                        ])) > 1 | len(set([x.f0 for x in combs])):
+                self.assertRaises(
+                    (SamplingRateMismatch, MainsFrequencyMismatch),
+                    lambda: sum(combs))
 
-                for vi in combs[1:]:
-                    vi_2 += vi
+        signatures = self.init_signatures(include_locs=True,
+                                          with_components=True)
 
-                self.assertEqual(vi_1.hash(), vi_2.hash())
-                self.assertEqual(vi_1.n_components, len(combs))
+        for combs in signatures:
+            vi_ = sum(combs)
 
-                vi_3 = vi_1.require_components(False)
-                vi_3 = vi_1 + vi_3
+            self.assertEqual(vi_.hash(),
+                             reduce(lambda a, b: a + b, combs).hash())
+            self.assertEqual(vi_.n_components, len(combs))
 
-                self.assertEqual(vi_3.n_components, 1)
+            if vi_.has_locs():
+                self.assertEqual(len(vi_.locs), len(combs))
 
-                I = np.asarray([vi.i for vi in combs])
-                V = np.asarray([vi.v for vi in combs])
+            vi_copy = vi_.copy()
+            vi_copy = vi_copy.require_components(False)
 
-                self.assertTrue(np.allclose(vi_1.v, VI.__vaggrule__(V)))
-                self.assertTrue(np.allclose(vi_1.i, VI.__iaggrule__(I)))
+            self.assertEqual(vi_copy.n_components, 1)
+            self.assertEqual((vi_copy + vi_).n_components, 1)
 
-                # TODO locs
+            I = np.asarray([vi.i for vi in combs])[:, None]
+            V = np.asarray([vi.v for vi in combs])[:, None]
+
+            self.assertTrue(np.allclose(vi_.v, VI.__vaggrule__(V)))
+            self.assertTrue(np.allclose(vi_.i, VI.__iaggrule__(I)))
+
+            locs = np.concatenate([x.locs for x in combs], axis=0)
+            self.assertTrue(np.allclose(locs, vi_.locs))
 
     def test_resample(self):
         for vi in self.init_signatures(include_locs=True):
@@ -128,7 +152,6 @@ class TestVI(test.TestCase):
 
                 self.assertGreaterEqual(vi_.locs.min(), 0)
                 self.assertLessEqual(vi_.locs.max(), vi_.n_samples)
-                print(vi_.locs[:, 0], vi_.locs[:, 1])
                 self.assertTrue((vi_.locs[:, 1] > vi_.locs[:, 0]).all())
                 self.assertFalse(np.any(vi_.locs[:, 1] == vi_.locs[:, 0]))
 
