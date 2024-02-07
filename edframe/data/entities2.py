@@ -362,6 +362,7 @@ class VI(Recording, BackupMixin):
         if isinstance(vi, int) and vi == 0:
             return self
 
+        # TODO check len
         if self.fs != vi.fs:
             raise SamplingRateMismatch
 
@@ -385,36 +386,6 @@ class VI(Recording, BackupMixin):
 
     def is_empty(self):
         return len(self) == 0
-
-    # def sync(self):
-    #     if self.n_components > 1:
-    #         raise AttributeError
-
-    #     if self.is_synced():
-    #         return self.copy()
-
-    #     fitps = FITPS()
-
-    #     try:
-    #         if self.has_locs():
-    #             v, i, locs = fitps(self.v, self.i, fs=self.fs, locs=self.locs)
-    #         else:
-    #             v, i = fitps(self.v, self.i, fs=self.fs)
-    #             locs = None
-
-    #         dims = v.shape
-    #         v, i = v.ravel(), i.ravel()
-    #     except NotEnoughCycles:
-    #         v, i = self.v, self.i
-    #         dims = 1, len(v)
-
-    #     return self.new(v,
-    #                     i,
-    #                     self.fs,
-    #                     self.f0,
-    #                     is_synced=True,
-    #                     dims=dims,
-    #                     locs=locs)
 
     def resample(self, fs, **kwargs):
         # TODO critical sampling rate condition
@@ -462,6 +433,7 @@ class VI(Recording, BackupMixin):
 
         if self.has_locs():
             locs = np.clip(self.locs + n, a_min=0, a_max=self.n_samples)
+        # NOTE should we assign locs if no locs given initially
 
         return self.new(v, i, self.fs, self.f0, locs=locs)
 

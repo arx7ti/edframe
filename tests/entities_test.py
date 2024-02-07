@@ -9,31 +9,35 @@ from edframe.data.generators import make_hf_cycles, make_oscillations
 from edframe.utils.exceptions import NotEnoughCycles, SingleCycleOnly, SamplingRateMismatch, MainsFrequencyMismatch
 
 # Experiment setup
-F0 = [40, 45, 50, 55, 60]
-FS = [1000, 2000, 4000]
-N_CYCLES = [1, 2, 3, 4, 5, 10, 20, 50]
-N_COMPONENTS = [2, 3, 4, 5, 10, 20]
+F0 = [40, 45, 49.8, 50, 51.123, 55, 59.45646, 60, 60.8123, 65]
+FS = [1111, 2132, 4558, 5000, 4000, 9999, 10001]
+N_CYCLES = [1, 2, 3, 4, 5, 10, 11, 20, 23, 50, 57]
+N_COMPONENTS = [1, 2, 3, 4, 5, 10, 20]
 RANDOM_STATE = 42
-N_CHOICES = 1
-N_SIGNATURES = 2
+N_CHOICES = 10
 V_DC_OFFSET = 0
+N_SIGNATURES = 500 
+N_SIGNATURES_PER_ITER = 2
+ITERGRID = list(
+    it.islice(it.product(F0, FS, N_CYCLES),
+              N_SIGNATURES // N_SIGNATURES_PER_ITER))
+
 rng = np.random.RandomState(RANDOM_STATE)
 
 
 class TestVI(test.TestCase):
 
-    def init_signatures(self, include_locs=False, with_components=False):
-        # TODO half with locs
+    def init_signatures(self, with_components=False):
+        # TODO +labels
         signatures = []
-        combs = it.product(F0, FS, N_CYCLES)
 
-        for f0, fs, n_cycles in combs:
+        for f0, fs, n_cycles in ITERGRID:
             dt = n_cycles / f0
             output_size = math.ceil(fs / f0)
             h_loc = output_size // 2
 
-            I, _ = make_oscillations(N_SIGNATURES,
-                                     N_SIGNATURES,
+            I, _ = make_oscillations(N_SIGNATURES // len(ITERGRID),
+                                     N_SIGNATURES // len(ITERGRID),
                                      fs=fs,
                                      f0=f0,
                                      dt=dt,
@@ -43,14 +47,22 @@ class TestVI(test.TestCase):
             v = np.sin(2 * np.pi * f0 * t) + V_DC_OFFSET
             V = np.stack(np.repeat(v[None], len(I), axis=0))
 
-            if include_locs:
-                a = np.random.randint(0, I.shape[1] - 1)
-                b = np.random.randint(a + 1, I.shape[1])
-                locs = [[a, b]]
-            else:
-                locs = None
+            a = np.random.randint(0, I.shape[1] - 1, size=len(I))
+            b = np.random.randint(a + 1, I.shape[1], size=len(I))
+            locs = np.stack((a, b), axis=1)[:, None].tolist()
 
-            signatures_ = [VI(v, i, fs, f0, locs=locs) for v, i in zip(V, I)]
+            if len(I) // 2 == 0:
+                nolocs = rng.choice(2)
+            else:
+                nolocs = len(I) // 2
+
+            for j in rng.choice(len(locs), size=nolocs, replace=False):
+                locs[j] = None
+
+            signatures_ = [
+                VI(v, i, fs, f0, locs=locs_)
+                for v, i, locs_ in zip(V, I, locs)
+            ]
 
             if with_components:
                 for n_components in N_COMPONENTS:
@@ -64,13 +76,15 @@ class TestVI(test.TestCase):
                         combs_ = [signatures_[i] for i in combs_]
                         signatures.append(combs_)
             else:
-                signatures.extend(
-                    [VI(v, i, fs, f0, locs=locs) for v, i in zip(V, I)])
+                signatures.extend([
+                    VI(v, i, fs, f0, locs=locs_)
+                    for v, i, locs_ in zip(V, I, locs)
+                ])
 
         return signatures
 
     def test_getitem(self):
-        for vi in self.init_signatures(include_locs=True):
+        for vi in self.init_signatures():
             n = np.random.randint(0, len(vi), size=2 * N_CHOICES)
 
             for a, b in np.sort(n).reshape(-1, 2):
@@ -93,7 +107,9 @@ class TestVI(test.TestCase):
                         self.assertAlmostEqual(vi_.i.sum(), vi.i[a:b].sum())
 
     def test_components(self):
-        signatures = self.init_signatures(include_locs=True)
+        # FIXME
+        # ValueError: all the input array dimensions except for the concatenation axis must match exactly, but along dimension 3, the array at index 0 has size 375 and the array at index 1 has size 2875
+        signatures = self.init_signatures()
 
         for n_components in N_COMPONENTS:
             replace = n_components > len(signatures)
@@ -106,8 +122,7 @@ class TestVI(test.TestCase):
                     (SamplingRateMismatch, MainsFrequencyMismatch),
                     lambda: sum(combs))
 
-        signatures = self.init_signatures(include_locs=True,
-                                          with_components=True)
+        signatures = self.init_signatures(with_components=True)
 
         for combs in signatures:
             vi_ = sum(combs)
@@ -137,7 +152,7 @@ class TestVI(test.TestCase):
             self.assertTrue(np.allclose(locs, vi_.locs))
 
     def test_resample(self):
-        for vi in self.init_signatures(include_locs=True):
+        for vi in self.init_signatures():
             for fs in rng.choice(range(1000, 10000), N_CHOICES, replace=False):
                 vi_ = vi.resample(fs)
                 self.assertEqual(vi_.fs, fs)
@@ -157,7 +172,7 @@ class TestVI(test.TestCase):
                 self.assertFalse(np.any(vi_.locs[:, 1] == vi_.locs[:, 0]))
 
     def test_roll(self):
-        for vi in self.init_signatures(include_locs=True):
+        for vi in self.init_signatures():
             for n in rng.choice(len(vi) + 1, N_CHOICES, replace=False):
                 vi_ = vi.roll(n)
 
@@ -184,12 +199,16 @@ class TestVI(test.TestCase):
                 dt1 = np.diff(vi_.locs, axis=1)
                 ids = np.argwhere(dt0 == dt1).ravel()
 
-                for i in ids:
-                    self.assertEqual(vi_.locs[i][0] - vi.locs[i][0], n)
-                    self.assertEqual(vi_.locs[i][1] - vi.locs[i][1], n)
+                if vi.has_locs():
+                    for i in ids:
+                        self.assertEqual(vi_.locs[i][0] - vi.locs[i][0], n)
+                        self.assertEqual(vi_.locs[i][1] - vi.locs[i][1], n)
+                else:
+                    self.assertEqual(vi_.locs.min(), 0)
+                    self.assertEqual(vi_.locs.max(), vi_.n_samples)
 
     def test_pad(self):
-        for vi in self.init_signatures(include_locs=True):
+        for vi in self.init_signatures():
             for n in rng.choice(100, N_CHOICES, replace=False):
                 vi_ = vi.pad(n)
                 a, b = vi._adjust_delta(n)
@@ -207,11 +226,16 @@ class TestVI(test.TestCase):
                 self.assertAlmostEqual(vi_.i.sum(), vi.i.sum())
                 self.assertGreaterEqual(vi_.locs.min(), 0)
                 self.assertLessEqual(vi_.locs.max(), vi_.n_samples)
-                self.assertEqual(vi_.locs.min() - vi.locs.min(), a)
-                self.assertEqual(vi_.locs.max() - vi.locs.max(), a)
+
+                if vi.has_locs():
+                    self.assertEqual(vi_.locs.min() - vi.locs.min(), a)
+                    self.assertEqual(vi_.locs.max() - vi.locs.max(), a)
+                else:
+                    self.assertEqual(vi_.locs.min(), 0)
+                    self.assertEqual(vi_.locs.max(), vi_.n_samples)
 
     def test_extrapolate(self):
-        for vi in self.init_signatures(include_locs=True):
+        for vi in self.init_signatures():
             for n in rng.choice(100, N_CHOICES, replace=False):
                 vi_ = vi.extrapolate(n)
                 a, b = vi._adjust_delta(n)
@@ -235,13 +259,16 @@ class TestVI(test.TestCase):
                 self.assertLessEqual(vi_.locs.max(), vi_.n_samples)
                 self.assertTrue(all([d1 >= d0 for d0, d1 in zip(dt0, dt1)]))
 
-                for i in ids:
-                    self.assertEqual(vi_.locs[i][0] - vi.locs[i][0], a)
-                    self.assertEqual(vi_.locs[i][1] - vi.locs[i][1], b + a)
+                if vi.has_locs():
+                    for i in ids:
+                        self.assertEqual(vi_.locs[i][0] - vi.locs[i][0], a)
+                        self.assertEqual(vi_.locs[i][1] - vi.locs[i][1], b + a)
+                else:
+                    self.assertEqual(vi_.locs.min(), 0)
+                    self.assertEqual(vi_.locs.max(), vi_.n_samples)
 
     def test_cycle(self):
-        for comps in self.init_signatures(include_locs=True,
-                                          with_components=True):
+        for comps in self.init_signatures(with_components=True):
             vi = sum(comps)
             vi_ = vi.cycle('mean')
 
@@ -259,8 +286,7 @@ class TestVI(test.TestCase):
             self.assertTrue((vi_.locs[:, 1] == vi_.n_samples).all())
 
     def test_unitscale(self):
-        for comps in self.init_signatures(include_locs=True,
-                                          with_components=True):
+        for comps in self.init_signatures(with_components=True):
             vi = sum(comps)
             vi_ = vi.unitscale()
             V, I = vi_.datafold
