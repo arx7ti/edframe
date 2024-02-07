@@ -123,6 +123,8 @@ class TestVI(test.TestCase):
             vi_copy = vi_copy.require_components(False)
 
             self.assertEqual(vi_copy.n_components, 1)
+            self.assertIsNone(vi_copy._locs)
+            self.assertIsNone((vi_copy + vi_)._locs)
             self.assertEqual((vi_copy + vi_).n_components, 1)
 
             I = np.asarray([vi.i for vi in combs])[:, None]
@@ -275,17 +277,21 @@ class TestVI(test.TestCase):
         for vi in self.init_signatures():
             vi_ = vi.fryze()
 
+            self.assertIsNone(vi.orthogonality)
+            self.assertEqual(vi_.orthogonality, 'Fryze')
             self.assertTrue(np.allclose(vi_.i, vi.i))
             self.assertTrue(np.allclose(vi_.v, vi.v))
-            # TODO locs
+            self.assertTrue(np.allclose(vi_.locs, vi.locs))
 
     def test_budeanu(self):
         for vi in self.init_signatures():
             vi_ = vi.budeanu()
 
+            self.assertIsNone(vi.orthogonality)
+            self.assertEqual(vi_.orthogonality, 'Budeanu')
             self.assertTrue(np.allclose(vi_.i, vi.i))
             self.assertTrue(np.allclose(vi_.v, vi.v))
-            # TODO locs
+            self.assertTrue(np.allclose(vi_.locs, vi.locs))
 
 
 if __name__ == '__main__':

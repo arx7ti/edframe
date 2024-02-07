@@ -586,10 +586,8 @@ class VI(Recording, BackupMixin):
             v, i = v[:, 0, None], i.sum(1, keepdims=True)
 
         i_a, i_q, i_d = budeanu(v, i)
-        print(v.shape, i.shape, i_a.shape)
         i = np.concatenate((i_a, i_q, i_d), axis=1)
         v = np.repeat(v, 3, axis=1)
-        print(v.shape, i.shape)
         locs = self.locs if self.has_locs() else None
 
         return self.new(v,
