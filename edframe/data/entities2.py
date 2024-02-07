@@ -255,14 +255,7 @@ class VI(Recording, BackupMixin):
         return deepcopy(self)
 
     def aggregate(self):
-        if self.n_components == 1:
-            return self.copy()
-
-        v, i = self._data
-        v = self.__vaggrule__(v)
-        i = self.__iaggrule__(i)
-
-        return self.new(v, i, self.fs, self.f0)
+        return self.new(self.v, self.i, self.fs, self.f0)
 
     def require_components(self, required=True):
         if required:
@@ -379,7 +372,7 @@ class VI(Recording, BackupMixin):
         v, i = np.concatenate((data1, data2), axis=1)
 
         if self._require_components and vi._require_components:
-            locs = np.concatenate((self.locs, vi.locs)) 
+            locs = np.concatenate((self.locs, vi.locs))
         else:
             v = self.__vaggrule__(v, keepdims=True)
             i = self.__iaggrule__(i, keepdims=True)
@@ -553,12 +546,20 @@ class VI(Recording, BackupMixin):
         else:
             raise ValueError
 
-        return self.new(v, i, self.fs, self.f0)
+        locs = None
+
+        if self.has_locs():
+            locs = np.zeros((self.n_components, 2), dtype=int)
+            locs[:, 1] = v.shape[-1]
+
+        return self.new(v, i, self.fs, self.f0, locs=locs)
 
     def unitscale(self):
-        v, i = self.data / abs(self.data).max(-1, keepdims=True)
+        v = self.vc / abs(self.v).max()
+        i = self.ic / abs(self.i).max()
+        locs = self.locs if self.has_locs() else None
 
-        return self.new(v, i, self.fs, self.f0)
+        return self.new(v, i, self.fs, self.f0, locs=locs)
 
     def fryze(self):
         v, i = self.data
@@ -569,8 +570,14 @@ class VI(Recording, BackupMixin):
         i_a, i_r = fryze(v, i)
         i = np.concatenate((i_a, i_r), axis=1)
         v = np.repeat(v, 2, axis=1)
+        locs = self.locs if self.has_locs() else None
 
-        return self.new(v, i, self.fs, self.f0, orthogonality='Fryze')
+        return self.new(v,
+                        i,
+                        self.fs,
+                        self.f0,
+                        locs=locs,
+                        orthogonality='Fryze')
 
     def budeanu(self):
         v, i = self.data
@@ -579,10 +586,18 @@ class VI(Recording, BackupMixin):
             v, i = v[:, 0, None], i.sum(1, keepdims=True)
 
         i_a, i_q, i_d = budeanu(v, i)
+        print(v.shape, i.shape, i_a.shape)
         i = np.concatenate((i_a, i_q, i_d), axis=1)
         v = np.repeat(v, 3, axis=1)
+        print(v.shape, i.shape)
+        locs = self.locs if self.has_locs() else None
 
-        return self.new(v, i, self.fs, self.f0, orthogonality='Budeanu')
+        return self.new(v,
+                        i,
+                        self.fs,
+                        self.f0,
+                        locs=locs,
+                        orthogonality='Budeanu')
 
     @staticmethod
     def _sine_waveform(amp, f0, fs, phase=0, dt=None, n=None):

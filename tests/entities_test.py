@@ -24,7 +24,6 @@ class TestVI(test.TestCase):
 
     def init_signatures(self, include_locs=False, with_components=False):
         # TODO half with locs
-        # TODO with components
         signatures = []
         combs = it.product(F0, FS, N_CYCLES)
 
@@ -239,7 +238,9 @@ class TestVI(test.TestCase):
                     self.assertEqual(vi_.locs[i][1] - vi.locs[i][1], b + a)
 
     def test_cycle(self):
-        for vi in self.init_signatures():
+        for comps in self.init_signatures(include_locs=True,
+                                          with_components=True):
+            vi = sum(comps)
             vi_ = vi.cycle('mean')
 
             self.assertEqual(len(vi_), vi_.cycle_size)
@@ -250,18 +251,25 @@ class TestVI(test.TestCase):
             self.assertEqual(vi_.cycle_size, vi.cycle_size)
             self.assertEqual(vi_.fs, vi.fs)
             self.assertEqual(vi_.f0, vi.f0)
-            # TODO locs
+
+            self.assertEqual(len(vi_.locs), len(vi.locs))
+            self.assertTrue((vi_.locs[:, 0] == 0).all())
+            self.assertTrue((vi_.locs[:, 1] == vi_.n_samples).all())
 
     def test_unitscale(self):
-        for vi in self.init_signatures():
+        for comps in self.init_signatures(include_locs=True,
+                                          with_components=True):
+            vi = sum(comps)
             vi_ = vi.unitscale()
             V, I = vi_.datafold
 
             self.assertNotEqual(V.mean(), 1)
             self.assertNotEqual(I.mean(), 1)
-            self.assertLessEqual(abs(vi_.i).max(), 1)
-            self.assertLessEqual(abs(vi_.v).max(), 1)
-            # TODO locs
+            self.assertAlmostEqual(abs(vi_.v).max(), 1)
+            self.assertAlmostEqual(abs(vi_.i).max(), 1)
+
+            self.assertEqual(len(vi_.locs), len(vi.locs))
+            self.assertTrue(np.allclose(vi_.locs, vi.locs))
 
     def test_fryze(self):
         for vi in self.init_signatures():
