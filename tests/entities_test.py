@@ -24,6 +24,11 @@ ITERGRID = list(
               N_SIGNATURES // N_SIGNATURES_PER_ITER))
 
 rng = np.random.RandomState(RANDOM_STATE)
+# rng = np.random.RandomState(None)
+
+
+def is_immutable(x):
+    return isinstance(x, int | float | str | tuple | frozenset)
 
 
 class TestVI(test.TestCase):
@@ -86,13 +91,14 @@ class TestVI(test.TestCase):
         return signatures
 
     def test_getitem(self):
-        for vi in self.init_signatures():
+        for vi in self.init_signatures(with_components=True):
+            vi = sum(vi)
             n = np.random.randint(0, len(vi), size=2 * N_CHOICES)
 
             for a, b in np.sort(n).reshape(-1, 2):
 
                 if b <= a:
-                    self.assertRaises(ValueError, vi[a:b])
+                    self.assertRaises(ValueError, lambda: vi[a:b])
                 else:
                     vi_ = vi[a:b]
 
@@ -112,8 +118,6 @@ class TestVI(test.TestCase):
                 self.assertIsNot(id(vi_._T), id(vi._T))
 
     def test_components(self):
-        # FIXME
-        # ValueError: all the input array dimensions except for the concatenation axis must match exactly, but along dimension 3, the array at index 0 has size 375 and the array at index 1 has size 2875
         signatures = self.init_signatures()
 
         for n_components in N_COMPONENTS:
@@ -157,7 +161,9 @@ class TestVI(test.TestCase):
             self.assertTrue(np.allclose(locs, vi_.locs))
 
     def test_resample(self):
-        for vi in self.init_signatures():
+        for vi in self.init_signatures(with_components=True):
+            vi = sum(vi)
+
             for fs in rng.choice(range(1000, 10000), N_CHOICES, replace=False):
                 vi_ = vi.resample(fs)
                 self.assertEqual(vi_.fs, fs)
@@ -181,7 +187,9 @@ class TestVI(test.TestCase):
                 self.assertIsNot(id(vi_._T), id(vi._T))
 
     def test_roll(self):
-        for vi in self.init_signatures():
+        for vi in self.init_signatures(with_components=True):
+            vi = sum(vi)
+
             for n in rng.choice(len(vi) + 1, N_CHOICES, replace=False):
                 vi_ = vi.roll(n)
 
@@ -204,8 +212,8 @@ class TestVI(test.TestCase):
                 self.assertGreaterEqual(vi_.locs.min(), 0)
                 self.assertLessEqual(vi_.locs.max(), vi_.n_samples)
 
-                dt0 = np.diff(vi.locs, axis=1)
-                dt1 = np.diff(vi_.locs, axis=1)
+                dt0 = np.diff(vi.locs, axis=1).ravel()
+                dt1 = np.diff(vi_.locs, axis=1).ravel()
                 ids = np.argwhere(dt0 == dt1).ravel()
 
                 if vi.has_locs():
@@ -221,7 +229,9 @@ class TestVI(test.TestCase):
                 self.assertIsNot(id(vi_._T), id(vi._T))
 
     def test_pad(self):
-        for vi in self.init_signatures():
+        for vi in self.init_signatures(with_components=True):
+            vi = sum(vi)
+
             for n in rng.choice(100, N_CHOICES, replace=False):
                 vi_ = vi.pad(n)
                 a, b = vi._adjust_delta(n)
@@ -252,7 +262,9 @@ class TestVI(test.TestCase):
                 self.assertIsNot(id(vi_._T), id(vi._T))
 
     def test_extrapolate(self):
-        for vi in self.init_signatures():
+        for vi in self.init_signatures(with_components=True):
+            vi = sum(vi)
+
             for n in rng.choice(100, N_CHOICES, replace=False):
                 vi_ = vi.extrapolate(n)
                 a, b = vi._adjust_delta(n)
@@ -329,7 +341,8 @@ class TestVI(test.TestCase):
             self.assertIsNot(id(vi_._T), id(vi._T))
 
     def test_fryze(self):
-        for vi in self.init_signatures():
+        for vi in self.init_signatures(with_components=True):
+            vi = sum(vi)
             vi_ = vi.fryze()
 
             self.assertIsNone(vi.orthogonality)
@@ -343,7 +356,8 @@ class TestVI(test.TestCase):
             self.assertIsNot(id(vi_._T), id(vi._T))
 
     def test_budeanu(self):
-        for vi in self.init_signatures():
+        for vi in self.init_signatures(with_components=True):
+            vi = sum(vi)
             vi_ = vi.budeanu()
 
             self.assertIsNone(vi.orthogonality)
@@ -357,7 +371,8 @@ class TestVI(test.TestCase):
             self.assertIsNot(id(vi_._T), id(vi._T))
 
     def test_features(self):
-        for vi in self.init_signatures():
+        for vi in self.init_signatures(with_components=True):
+            vi = sum(vi)
             n_features = vi.n_features
 
             fs_numpy = vi.features(format="numpy")
@@ -375,6 +390,38 @@ class TestVI(test.TestCase):
             fs_list = vi.features(format="list")
             self.assertIsInstance(fs_list, list)
             self.assertGreaterEqual(len(fs_list), n_features)
+
+    def test_hash(self):
+        for vi in self.init_signatures(with_components=True):
+            vi = sum(vi)
+            h = vi.hash()
+            self.assertIsInstance(h, int)
+            self.assertGreaterEqual(h, 0)
+
+    def test_todict(self):
+        for vi in self.init_signatures(with_components=True):
+            vi = sum(vi)
+            vi = vi.fryze()
+            d = vi.todict()
+
+            self.assertIn('v', d)
+            self.assertIn('i', d)
+            self.assertIn('fs', d)
+            self.assertIn('f0', d)
+            self.assertIn('components', d)
+            self.assertIn('locs', d)
+
+            self.assertEqual(d['v'].tolist(), vi.v.tolist())
+            self.assertEqual(d['i'].tolist(), vi.i.tolist())
+            self.assertEqual(d['fs'], vi.fs)
+            self.assertEqual(d['f0'], vi.f0)
+            self.assertEqual(len(d['components']), vi.n_components)
+            self.assertEqual(len(d['components'][0]), vi.n_orthogonals)
+            self.assertEqual(d['locs'].tolist(), vi.locs.tolist())
+
+            self.assertNotEqual(id(d['v']), id(vi.v))
+            self.assertNotEqual(id(d['i']), id(vi.i))
+            self.assertNotEqual(id(d['locs']), id(vi.locs))
 
 
 if __name__ == '__main__':
