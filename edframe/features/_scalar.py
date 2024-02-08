@@ -7,7 +7,7 @@ from edframe.utils.hf import zero_crossings
 from edframe.utils.exceptions import NotEnoughCycles, SingleCycleOnly
 
 
-def spectral_centroid(x, normalized):
+def spectral_centroid(x, normalized=True):
     a = abs(np.fft.rfft(x, axis=-1))[..., 1:]
     arange = np.arange(1, a.shape[-1] + 1)
     arange = np.expand_dims(arange, axis=tuple(range(len(a.shape) - 1)))

@@ -200,7 +200,7 @@ class VI(Recording, BackupMixin):
 
     @feature
     def thd(self, **kwargs):
-        return thd(self.i, self.fs, f0=self.f0(), **kwargs)
+        return thd(self.i, self.fs, f0=self.f0, **kwargs)
 
     @feature
     def power_factor(self, **kwargs):
@@ -210,11 +210,11 @@ class VI(Recording, BackupMixin):
 
     @feature
     def spec(self, **kwargs):
-        return spectrum(self.i, self.fs, f0=self.f0(), **kwargs)
+        return spectrum(self.i, self.fs, f0=self.f0, **kwargs)
 
     @feature
     def vspec(self, **kwargs):
-        return spectrum(self.v, self.fs, **kwargs)
+        return spectrum(self.v, self.fs, f0=self.f0, **kwargs)
 
     @feature
     def spectral_centroid(self):
