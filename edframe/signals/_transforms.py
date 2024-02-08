@@ -343,7 +343,7 @@ def fryze(v, i):
 
 
 def budeanu(v, i):
-    # TODO multiple cycles support
+    # NOTE supports only folded cycles
     # Fourier Transform
     zv = np.fft.rfft(v, axis=-1)
     zi = np.fft.rfft(i, axis=-1)
@@ -365,12 +365,12 @@ def budeanu(v, i):
 
     # Compute active component of current
     Vrms = np.sqrt((V**2).sum(-1))
-    ia = P / Vrms**2 * v
+    ia = (P / Vrms**2)[..., None] * v
 
     # Compute reactive component of current
     zv[..., 1:] *= 1j
     u = np.fft.irfft(zv, axis=-1, n=v.shape[-1])
-    iq = Q / Vrms**2 * u
+    iq = (Q / Vrms**2)[..., None] * u
 
     # Compute distortion component of current
     id = i - ia - iq

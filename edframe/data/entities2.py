@@ -402,6 +402,7 @@ class VI(Recording, BackupMixin):
 
     def resample(self, fs, **kwargs):
         # TODO critical sampling rate condition
+        # FIXME not a smooth stacking after resampling
 
         if fs == self.fs:
             return self.copy()
@@ -566,6 +567,8 @@ class VI(Recording, BackupMixin):
 
     def budeanu(self):
         v, i = self.data
+        # v, i = self.datafold
+        # dims = self.n_components, self.n_orthogonals, -1
 
         if self.n_orthogonals > 1:
             v, i = v[:, 0, None], i.sum(1, keepdims=True)
@@ -573,6 +576,8 @@ class VI(Recording, BackupMixin):
         i_a, i_q, i_d = budeanu(v, i)
         i = np.concatenate((i_a, i_q, i_d), axis=1)
         v = np.repeat(v, 3, axis=1)
+        # v, i = v.reshape(*dims), i.reshape(*dims)
+
         locs = self.locs if self.has_locs() else None
 
         return self.new(v,
@@ -699,16 +704,16 @@ class VI(Recording, BackupMixin):
         return hash(self.data.tobytes()) & 0xFFFFFFFFFFFFFFFF
 
     def todict(self):
-        return {'v': self.v, 'i': self.i, 'fs': self.fs, 'f0': self.f0}
+        comps = [(*self.ic[i], ) for i in range(self.n_components)]
 
-    def todf(self):
-        return pd.DataFrame(self.todict())
-
-    def tolist(self):
-        return [self.v.tolist(), self.i.tolist()]
-
-    def toarray(self):
-        return self.data
+        return {
+            'v': self.v,
+            'i': self.i,
+            'fs': self.fs,
+            'f0': self.f0,
+            'components': comps,
+            'locs': self.locs,
+        }
 
 
 class P(L):
