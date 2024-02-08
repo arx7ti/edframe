@@ -1,5 +1,6 @@
 import math
 import numpy as np
+import pandas as pd
 import itertools as it
 import unittest as test
 from functools import reduce
@@ -26,7 +27,7 @@ rng = np.random.RandomState(RANDOM_STATE)
 
 
 class TestVI(test.TestCase):
-    # TODO test for immutability of variables after an action
+    # TODO deeper tests of data leakage between newly created instances
 
     def init_signatures(self, with_components=False):
         # TODO +labels
@@ -53,11 +54,11 @@ class TestVI(test.TestCase):
             locs = np.stack((a, b), axis=1)[:, None].tolist()
 
             if len(I) // 2 == 0:
-                nolocs = rng.choice(2)
+                nolocs_size = rng.choice(2)
             else:
-                nolocs = len(I) // 2
+                nolocs_size = len(I) // 2
 
-            for j in rng.choice(len(locs), size=nolocs, replace=False):
+            for j in rng.choice(len(locs), size=nolocs_size, replace=False):
                 locs[j] = None
 
             signatures_ = [
@@ -354,6 +355,26 @@ class TestVI(test.TestCase):
             self.assertIsNot(id(vi_._data), id(vi.data))
             self.assertIsNot(id(vi_._f0), id(vi.f0))
             self.assertIsNot(id(vi_._T), id(vi._T))
+
+    def test_features(self):
+        for vi in self.init_signatures():
+            n_features = vi.n_features
+
+            fs_numpy = vi.features(format="numpy")
+            self.assertIsInstance(fs_numpy, np.ndarray)
+            self.assertGreaterEqual(len(fs_numpy), n_features)
+
+            fs_pandas = vi.features(format="pandas")
+            self.assertIsInstance(fs_pandas, pd.DataFrame)
+            self.assertGreaterEqual(fs_pandas.shape[1], n_features)
+
+            fs_dict = vi.features(format="dict")
+            self.assertIsInstance(fs_dict, dict)
+            self.assertGreaterEqual(len(fs_dict), n_features)
+
+            fs_list = vi.features(format="list")
+            self.assertIsInstance(fs_list, list)
+            self.assertGreaterEqual(len(fs_list), n_features)
 
 
 if __name__ == '__main__':

@@ -27,6 +27,19 @@ from ..utils.common import nested_dict
 class Recording:
 
     @property
+    def feature_names(self):
+        features = sorted([
+            k for k, v in self.__class__.__dict__.items()
+            if getattr(v, 'is_feature', False)
+        ])
+
+        return list(features)
+
+    @property
+    def n_features(self):
+        return len(self.feature_names)
+
+    @property
     def fs(self):
         return self._fs
 
@@ -608,10 +621,7 @@ class VI(Recording, BackupMixin):
 
     def features(self, features=None, format='list', **kwargs):
         if features is None:
-            features = [
-                k for k, v in self.__class__.__dict__.items()
-                if getattr(v, 'is_feature', False)
-            ]
+            features = self.feature_names
         else:
             ufeatures = set(features)
 
