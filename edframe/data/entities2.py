@@ -402,14 +402,12 @@ class VI(Recording, BackupMixin):
 
     def resample(self, fs, **kwargs):
         # TODO critical sampling rate condition
-        # FIXME not a smooth stacking after resampling
 
         if fs == self.fs:
             return self.copy()
 
         locs = None
         Tn = math.ceil(fs / self.fs * self.cycle_size)
-        # HOW IT AFFECTS DATAFOLD?
 
         if fs > self.fs:
             v, i = upsample(self.datafold, Tn, **kwargs)

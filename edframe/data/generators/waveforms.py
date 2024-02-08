@@ -235,6 +235,7 @@ def make_oscillations(
         f0=50.,
         **cycles_kwargs,
 ):
+    # FIXME not a smooth cycles stacking
     cycle_size = math.ceil(fs / f0)
     time = np.linspace(0, dt, math.ceil(dt * f0 * cycle_size))
     n_cycles_per_signature = math.ceil(len(time) / cycle_size)
