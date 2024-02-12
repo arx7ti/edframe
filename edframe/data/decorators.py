@@ -29,3 +29,14 @@ def safe_mode(method):
         return result
 
     return fn
+
+
+def check_empty(method):
+
+    def fn(self, *args, **kwargs):
+        if self.is_empty():
+            raise AttributeError
+
+        return method(self, *args, **kwargs)
+
+    return fn

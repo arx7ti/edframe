@@ -17,14 +17,25 @@ from statsmodels.tools.sm_exceptions import MissingDataError
 
 from datetime import datetime
 from pickle import HIGHEST_PROTOCOL
-from .decorators import feature, safe_mode
+from .decorators import feature, safe_mode, check_empty
 from ..features import fundamental, spectrum, thd, spectral_centroid, temporal_centroid, rms
-from ..utils.exceptions import NotEnoughCycles, SingleCycleOnly, SamplingRateMismatch, MainsFrequencyMismatch
+from ..utils.exceptions import NotEnoughCycles, SingleCycleOnly, NSamplesMismatch, SamplingRateMismatch, MainsFrequencyMismatch
 from ..signals import FITPS, downsample, upsample, fryze, budeanu, extrapolate, pad
 from ..utils.common import nested_dict
 
 
 class Recording:
+
+    @property
+    def n_channels(self):
+        return self.data.shape[0]
+
+    @property
+    def n_components(self):
+        if self.is_empty():
+            return 0
+
+        return self.data.shape[1]
 
     @property
     def feature_names(self):
@@ -52,17 +63,31 @@ class Recording:
         return cls(*args, **kwargs)
 
     def __init__(self, data, fs, appliances=None, locs=None) -> None:
-        if not hasattr(appliances, '__len__'):
+        has_apps = appliances is not None and hasattr(appliances, '__len__')
+        has_locs = locs is not None and hasattr(locs, '__len__')
+
+        if has_locs:
+            assert None not in locs
+            locs = np.asarray(locs)
+
+        if has_apps and has_locs:
+            assert len(locs) == len(appliances)
+
+        if isinstance(appliances, str | int):
             appliances = [appliances] * data.shape[1]
 
-        if appliances is not None and locs is not None:
-            assert len(appliances) == len(locs)
-
+        # User-defined data
         self._data = data
         self._fs = fs
         self._appliances = appliances
-        self._locs = None if locs is None else np.asarray(locs)
+        self._locs = locs
+
+        # Default attributes
         self._require_components = True
+        self._is_empty = False
+
+    def is_empty(self):
+        return self._is_empty
 
 
 class BackupMixin:
@@ -95,7 +120,15 @@ class VI(Recording, BackupMixin):
     '''
     Assumes a whole number of cycles and synchronized voltage 
     '''
+
     # TODO empty signal
+
+    def __source__(self):
+        '''
+        Source signal used for features calculation
+        '''
+
+        return self.s
 
     @staticmethod
     def __iaggrule__(i, keepdims=False):
@@ -130,6 +163,10 @@ class VI(Recording, BackupMixin):
         return self.data[1]
 
     @property
+    def sc(self):
+        return self.vc * self.ic
+
+    @property
     def vfold(self):
         return self.vc.reshape(self.n_components, self.n_cycles,
                                self.cycle_size)
@@ -140,19 +177,40 @@ class VI(Recording, BackupMixin):
                                self.cycle_size)
 
     @property
+    def sfold(self):
+        return self.sc.reshape(self.n_components, self.n_cycles,
+                               self.cycle_size)
+
+    @property
+    def appliances(self):
+        if self.is_empty():
+            return None
+
+        if self.has_appliances():
+            # TODO test for drop if locs dropped
+            return self._appliances.copy()
+
+        return [None]
+
+    @property
     def labels(self):
-        return self._appliances
+        return self.appliances
 
-    @property
-    def n_channels(self):
-        return self.data.shape[0]
+    # @property
+    # def n_appliances(self):
+    #     if self.is_empty():
+    #         return 0
 
-    @property
-    def n_components(self):
-        return self.data.shape[1]
+    #     if self.has_appliances():
+    #         return len(self.appliances)
+
+    #     return 1
 
     @property
     def n_orthogonals(self):
+        if self.is_empty():
+            return 0
+
         return self.data.shape[2]
 
     @property
@@ -168,6 +226,10 @@ class VI(Recording, BackupMixin):
         return self.n_samples // self.cycle_size
 
     @property
+    def dt(self):
+        return self.n_samples / self.fs
+
+    @property
     def dims(self):
         return self.n_channels, self.n_components, self.n_orthogonals, self.n_samples
 
@@ -178,10 +240,15 @@ class VI(Recording, BackupMixin):
 
     @property
     def components(self):
-        return [
-            self.new(self.vc[i], self.ic[i], self.fs, self.f0)
-            for i in range(self.n_components)
-        ]
+        raise NotImplementedError
+        # return [
+        #     self.new(self.vc[i],
+        #              self.ic[i],
+        #              self.fs,
+        #              self.f0,
+        #              appliances=self.appliances[i],
+        #              locs=self.locs[i]) for i in range(self.n_components)
+        # ]
 
     @property
     def orthogonality(self):
@@ -189,10 +256,13 @@ class VI(Recording, BackupMixin):
 
     @property
     def locs(self):
-        if self._locs is None:
+        if self.is_empty():
+            return None
+
+        if not self.has_locs():
             return np.asarray([[0, self.n_samples] * self.n_components])
-        else:
-            return self._locs.copy()
+
+        return self._locs.copy()
 
     @feature
     def phase_shift(self):
@@ -207,13 +277,9 @@ class VI(Recording, BackupMixin):
 
         return dphi
 
-    # @feature
-    # def if0(self, mode='median'):
-    #     return fundamental(self.i, self.fs, mode=mode)
-
     @feature
     def thd(self, **kwargs):
-        return thd(self.i, self.fs, f0=self.f0, **kwargs)
+        return thd(self.__source__(), self.fs, f0=self.f0, **kwargs)
 
     @feature
     def power_factor(self, **kwargs):
@@ -223,19 +289,23 @@ class VI(Recording, BackupMixin):
 
     @feature
     def spec(self, **kwargs):
-        return spectrum(self.i, self.fs, f0=self.f0, **kwargs)
+        return spectrum(self.__source__(), self.fs, f0=self.f0, **kwargs)
 
     @feature
     def vspec(self, **kwargs):
         return spectrum(self.v, self.fs, f0=self.f0, **kwargs)
 
     @feature
+    def ispec(self, **kwargs):
+        return spectrum(self.i, self.fs, f0=self.f0, **kwargs)
+
+    @feature
     def spectral_centroid(self):
-        return spectral_centroid(self.i)
+        return spectral_centroid(self.__source__())
 
     @feature
     def temporal_centroid(self):
-        return temporal_centroid(self.i)
+        return temporal_centroid(self.__source__())
 
     def trajectory(self, n_bins=50):
         '''
@@ -301,10 +371,14 @@ class VI(Recording, BackupMixin):
 
         # + VOLTAGE CHECK
         # Voltage should be synchronous and starting with positive semi-cycle
-        if v.shape[-1] // T == 0:
+        if v.shape[-1] // T == 0 and v.shape[-1] > 0:
             raise ValueError
 
-        if np.std(v[..., :T // 2]) <= 0:
+        # TODO reverse case support
+        vhalf = v[..., :T // 2]
+        # ihalf = i[..., :T // 2]
+
+        if np.mean(vhalf) < 0:
             raise ValueError
         # - VOLTAGE CHECK
 
@@ -349,20 +423,52 @@ class VI(Recording, BackupMixin):
             data[1, ..., data.shape[-1] -
                  (self.cycle_size - b0 % self.cycle_size):] = 0
 
+        assert not np.may_share_memory(data, self.data)
+
+        v, i = data
+        appliances = self.appliances
+
         if self.has_locs():
             xa, xb = self.locs.T
 
-            cdrop = np.argwhere((a0 >= xb) | (b0 <= xa)).ravel()
+            drop = np.argwhere((a0 >= xb) | (b0 <= xa)).ravel()
 
             xa = np.maximum(xa - a0, 0)
             xb = np.minimum(xa + b0 - a0, xb - a0)
             locs = np.stack((xa, xb)).T
-
-            locs = np.delete(locs, cdrop, axis=0)
-            data = np.delete(data, cdrop, axis=1)
             locs = np.clip(locs, a_min=0, a_max=data.shape[-1])
 
-        return self.new(*data, self.fs, self.f0, locs=locs)
+            v, i, appliances, locs = self._drop_components(
+                drop, v, i, appliances, locs)
+
+        if v is None or i is None:
+            return VIEmpty(self.fs, self.f0, self.n_samples)
+
+        return self.new(v,
+                        i,
+                        self.fs,
+                        self.f0,
+                        appliances=appliances,
+                        locs=locs)
+
+    @staticmethod
+    def _drop_components(ids, *data):
+        data__ = []
+
+        for data_ in data:
+            if isinstance(data_, np.ndarray):
+                data_ = np.delete(data_, ids, axis=0)
+            elif isinstance(data_, list):
+                data_ = data_.copy()
+
+                for j in sorted(ids, reverse=True):
+                    del data_[j]
+            else:
+                raise NotImplementedError
+
+            data__.append(data_ if len(data_) > 0 else None)
+
+        return tuple(data__)
 
     def __add__(self, vi):
         return self.add(vi)
@@ -372,10 +478,13 @@ class VI(Recording, BackupMixin):
 
     def add(self, vi):
         # FIXME
+        # TODO if n_orthogonals > 1
         if isinstance(vi, int) and vi == 0:
             return self
 
-        # TODO check len
+        if self.n_samples != vi.n_samples:
+            raise NSamplesMismatch
+
         if self.fs != vi.fs:
             raise SamplingRateMismatch
 
@@ -384,24 +493,36 @@ class VI(Recording, BackupMixin):
 
         data1, data2 = self.data, vi.data
         v, i = np.concatenate((data1, data2), axis=1)
+        appliances = self.appliances + vi.appliances
+
+        assert len(v) == len(i) == len(appliances)
 
         if self._require_components and vi._require_components:
             locs = np.concatenate((self.locs, vi.locs))
+
+            assert len(appliances) == len(locs)
         else:
             v = self.__vaggrule__(v, keepdims=True)
             i = self.__iaggrule__(i, keepdims=True)
             locs = None
 
-        return self.new(v, i, self.fs, self.f0, locs=locs)
+        return self.new(v,
+                        i,
+                        self.fs,
+                        self.f0,
+                        appliances=appliances,
+                        locs=locs)
+
+    def has_appliances(self):
+        return self._appliances is not None
 
     def has_locs(self):
         return self._locs is not None
 
-    def is_empty(self):
-        return len(self) == 0
-
     def resample(self, fs, **kwargs):
         # TODO critical sampling rate condition
+        if self.is_empty():
+            return self.new(fs, self.f0, self.n_samples)
 
         if fs == self.fs:
             return self.copy()
@@ -424,17 +545,26 @@ class VI(Recording, BackupMixin):
             locs = locs.astype(int)
             locs = np.clip(locs, a_min=0, a_max=v.shape[-1])
 
-        return self.new(v, i, fs, self.f0, locs=locs)
+        return self.new(v,
+                        i,
+                        fs,
+                        self.f0,
+                        appliances=self.appliances,
+                        locs=locs)
 
     def roll(self, n):
         '''
         cycle-wise roll 
         '''
-        if n == 0:
-            return self.new(self.vc, self.ic, self.fs, self.f0)
-
-        locs = None
-        n = len(self) if abs(n) > len(self) else n
+        if self.is_empty() or n > self.n_samples:
+            return self.new(self.fs, self.f0, self.n_samples)
+        elif n == 0:
+            return self.new(self.vc,
+                            self.ic,
+                            self.fs,
+                            self.f0,
+                            appliances=self.appliances,
+                            locs=self.locs if self.has_locs() else None)
 
         n_cycles = n // self.cycle_size * self.cycle_size
         v, i = np.roll(self.data, n_cycles, axis=-1)
@@ -443,14 +573,25 @@ class VI(Recording, BackupMixin):
         mute = np.s_[..., mute]
         i[mute] = 0
 
-        if self.has_locs():
-            locs = np.clip(self.locs + n, a_min=0, a_max=self.n_samples)
-        # NOTE should we assign locs if no locs given initially
+        appliances = self.appliances
+        locs = np.clip(self.locs + n, a_min=0, a_max=self.n_samples)
 
-        return self.new(v, i, self.fs, self.f0, locs=locs)
+        drop = np.argwhere(locs[:, 0] > self.n_samples).ravel()
+        v, i, appliances, locs = self._drop_components(drop, v, i, appliances,
+                                                       locs)
+
+        return self.new(v,
+                        i,
+                        self.fs,
+                        self.f0,
+                        appliances=appliances,
+                        locs=locs)
 
     def _adjust_by_cycle_size(self, n):
-        n += self.cycle_size - n % self.cycle_size
+        dn = self.cycle_size - n % self.cycle_size
+        n += dn if n % self.cycle_size > 0 else 0
+        # n += dn
+        # n += n % self.cycle_size
 
         return n
 
@@ -458,7 +599,7 @@ class VI(Recording, BackupMixin):
         if isinstance(n, tuple):
             a, b = n
         else:
-            a, b = n - n // 2, n
+            a, b = n - n // 2, n // 2
 
         if a != 0:
             a = self._adjust_by_cycle_size(a)
@@ -471,6 +612,10 @@ class VI(Recording, BackupMixin):
     def extrapolate(self, n):
         V, I = [], []
         n = self._adjust_delta(n)
+
+        if self.is_empty():
+            return self.new(self.fs, self.f0, sum(n) + self.n_samples)
+
         locs = self.locs if self.has_locs() else None
         dims = self.n_components, self.n_orthogonals, -1
 
@@ -499,12 +644,21 @@ class VI(Recording, BackupMixin):
         if self.has_locs():
             locs = np.clip(locs, a_min=0, a_max=v.shape[-1])
 
-        return self.new(v, i, self.fs, self.f0, locs=locs)
+        return self.new(v,
+                        i,
+                        self.fs,
+                        self.f0,
+                        appliances=self.appliances,
+                        locs=locs)
 
     def pad(self, n):
         locs = None
         V, I = [], []
         n = self._adjust_delta(n)
+
+        if self.is_empty():
+            return self.new(self.fs, self.f0, sum(n) + self.n_samples)
+
         dims = self.n_components, self.n_orthogonals, -1
 
         for vo, io in zip(*self.data):
@@ -520,9 +674,17 @@ class VI(Recording, BackupMixin):
             locs = self.locs + n[0]
             locs = np.clip(locs, a_min=0, a_max=v.shape[-1])
 
-        return self.new(v, i, self.fs, self.f0, locs=locs)
+        return self.new(v,
+                        i,
+                        self.fs,
+                        self.f0,
+                        appliances=self.appliances,
+                        locs=locs)
 
     def cycle(self, mode='mean'):
+        if self.is_empty():
+            return self.new(self.fs, self.f0, self.n_samples)
+
         if mode == 'mean':
             v, i = np.mean(self.datafold, axis=-2)
         elif mode == 'median':
@@ -536,17 +698,34 @@ class VI(Recording, BackupMixin):
             locs = np.zeros((self.n_components, 2), dtype=int)
             locs[:, 1] = v.shape[-1]
 
-        return self.new(v, i, self.fs, self.f0, locs=locs)
+        return self.new(v,
+                        i,
+                        self.fs,
+                        self.f0,
+                        appliances=self.appliances,
+                        locs=locs)
 
     def unitscale(self):
+        if self.is_empty():
+            return self.new(self.fs, self.f0, self.n_samples)
+
         v = self.vc / abs(self.v).max()
         i = self.ic / abs(self.i).max()
         locs = self.locs if self.has_locs() else None
 
-        return self.new(v, i, self.fs, self.f0, locs=locs)
+        return self.new(v,
+                        i,
+                        self.fs,
+                        self.f0,
+                        appliances=self.appliances,
+                        locs=locs)
 
     def fryze(self):
+        orthogonality = 'Fryze'
         v, i = self.data
+
+        if self.is_empty():
+            return self.new(self.fs, self.f0, self.n_samples)
 
         if self.n_orthogonals > 1:
             v, i = v[:, 0, None], i.sum(1, keepdims=True)
@@ -560,13 +739,16 @@ class VI(Recording, BackupMixin):
                         i,
                         self.fs,
                         self.f0,
+                        appliances=self.appliances,
                         locs=locs,
-                        orthogonality='Fryze')
+                        orthogonality=orthogonality)
 
     def budeanu(self):
+        orthogonality = 'Budeanu'
         v, i = self.data
-        # v, i = self.datafold
-        # dims = self.n_components, self.n_orthogonals, -1
+
+        if self.is_empty():
+            return self.new(self.fs, self.f0, self.n_samples)
 
         if self.n_orthogonals > 1:
             v, i = v[:, 0, None], i.sum(1, keepdims=True)
@@ -574,7 +756,6 @@ class VI(Recording, BackupMixin):
         i_a, i_q, i_d = budeanu(v, i)
         i = np.concatenate((i_a, i_q, i_d), axis=1)
         v = np.repeat(v, 3, axis=1)
-        # v, i = v.reshape(*dims), i.reshape(*dims)
 
         locs = self.locs if self.has_locs() else None
 
@@ -582,45 +763,9 @@ class VI(Recording, BackupMixin):
                         i,
                         self.fs,
                         self.f0,
+                        appliances=self.appliances,
                         locs=locs,
-                        orthogonality='Budeanu')
-
-    @staticmethod
-    def _sine_waveform(amp, f0, fs, phase=0, dt=None, n=None):
-        dt = 1 / f0 if dt is None else dt
-        n = math.ceil(fs * dt) if n is None else n
-        x = np.linspace(0, dt, n)
-        y = amp * np.sin(2 * np.pi * f0 * x + phase)
-
-        return y
-
-    @classmethod
-    def active_load(cls, v_amp, i_amp, fs, f0, dt=None, n=None):
-        v = cls._sine_waveform(v_amp, f0, fs, dt=dt, n=n)
-        i = cls._sine_waveform(i_amp, f0, fs, dt=dt, n=n)
-
-        # TODO check dims are needed for all synced
-        return cls(v, i, fs=fs, is_synced=False)
-
-    @classmethod
-    def reactive_load(
-        cls,
-        v_amp,
-        i_amp,
-        fs,
-        f0,
-        power_factor=1.0,
-        dt=None,
-        n=None,
-    ):
-        assert power_factor >= 0 and power_factor <= 1
-
-        phase = np.arccos(power_factor)
-        v = cls._sine_waveform(v_amp, f0, fs, dt=dt, n=n)
-        i = cls._sine_waveform(i_amp, f0, fs, phase=phase, dt=dt, n=n)
-
-        # TODO check dims are needed for all synced
-        return cls(v, i, fs=fs, is_synced=False)
+                        orthogonality=orthogonality)
 
     def features(self, features=None, format='list', **kwargs):
         if features is None:
@@ -713,6 +858,53 @@ class VI(Recording, BackupMixin):
             'locs': self.locs,
         }
 
+    @staticmethod
+    def _sine_waveform(amp, f0, fs, phase=0, dt=None, n=None):
+        dt = 1 / f0 if dt is None else dt
+        n = math.ceil(fs * dt) if n is None else n
+        x = np.linspace(0, dt, n)
+        y = amp * np.sin(2 * np.pi * f0 * x + phase)
+
+        return y
+
+    @classmethod
+    def active_load(cls, v_amp, i_amp, fs, f0, dt=None, n=None):
+        v = cls._sine_waveform(v_amp, f0, fs, dt=dt, n=n)
+        i = cls._sine_waveform(i_amp, f0, fs, dt=dt, n=n)
+
+        # TODO check dims are needed for all synced
+        return cls(v, i, fs=fs, is_synced=False)
+
+    @classmethod
+    def reactive_load(
+        cls,
+        v_amp,
+        i_amp,
+        fs,
+        f0,
+        power_factor=1.0,
+        dt=None,
+        n=None,
+    ):
+        assert power_factor >= 0 and power_factor <= 1
+
+        phase = np.arccos(power_factor)
+        v = cls._sine_waveform(v_amp, f0, fs, dt=dt, n=n)
+        i = cls._sine_waveform(i_amp, f0, fs, phase=phase, dt=dt, n=n)
+
+        return cls(v, i, fs=fs, is_synced=False)
+
+
+class VIEmpty(VI):
+    '''
+    A lazy and empty signal
+    '''
+
+    def __init__(self, fs, f0, n_samples=0) -> None:
+        v, i = np.zeros((2, 0, 0, n_samples))
+        super().__init__(v, i, fs, f0)
+        self._is_empty = True
+
 
 class P(L):
 
@@ -747,11 +939,7 @@ class VISet(DataSet, BackupMixin):
 
     @property
     def data(self):
-        data = []
-        for vi in self.signatures:
-            data.append(vi.data)
-
-        data = np.asarray(data).transpose(1, 0, 2)
+        data = np.stack([vi.data for vi in self.signatures])
 
         return data
 
@@ -793,9 +981,10 @@ class VISet(DataSet, BackupMixin):
         v: np.ndarray,
         i: np.ndarray,
         fs,
+        f0,
         y=None,
         locs=None,
-        **kwargs,
+        safe_mode=True,
     ):
         assert v.shape == i.shape
         assert len(v.shape) == len(i.shape) == 2
@@ -813,33 +1002,31 @@ class VISet(DataSet, BackupMixin):
         data = []
 
         for vj, ij, yj, locsj in zip(v, i, y, locs):
-            vi = VI(v=vj, i=ij, fs=fs, y=yj, locs=locsj)
+            vi = VI(vj, ij, fs, f0, y=yj, locs=locsj)
             data.append(vi)
 
-        return cls(data, **kwargs)
+        return cls(data, safe_mode=safe_mode)
 
     def __init__(
         self,
         signatures: list[VI],
-        f0=None,
-        adjust_len_by='median',
+        n_cycles='median',
         safe_mode=True,
     ):
-        ls = [len(vi) for vi in signatures]
+        n_samples = [vi.n_samples for vi in signatures]
         fs = [vi.fs for vi in signatures]
-        # TODO if f0 is undefined
-        # f0 = [vi.f0() for vi in signatures]
+        f0 = [vi.f0 for vi in signatures]
 
         if not all([fs[0] == f for f in fs[1:]]):
             raise ValueError
 
-        # if not all([f0[0] == f for f in f0[1:]]):
-        #     raise ValueError
+        if not all([f0[0] == f for f in f0[1:]]):
+            raise ValueError
 
-        if adjust_len_by == 'median':
-            n_samples = np.median(ls)
-        elif adjust_len_by == 'mean':
-            n_samples = np.mean(ls)
+        if n_cycles == 'median':
+            n_samples = np.median(n_samples)
+        elif n_cycles == 'mean':
+            n_samples = np.mean(n_samples)
         else:
             raise ValueError
 
@@ -851,9 +1038,8 @@ class VISet(DataSet, BackupMixin):
             vi = signatures.pop(0)
             dn = n_samples - len(vi)
 
-            # TODO if not synced
             if dn > 0:
-                vi = vi.extrapolate(dn)
+                vi = vi.extrapolate((0, dn))
             elif dn < 0:
                 vi = vi[:n_samples]
 
@@ -863,10 +1049,10 @@ class VISet(DataSet, BackupMixin):
             new_signatures.append(vi)
 
         self.signatures = new_signatures
-        self._safe_mode = safe_mode
         self._n_samples = n_samples
-        self._fs = new_signatures[0].fs
-        self._f0 = new_signatures[0].f0 if f0 is None else f0
+        self._fs = fs[0]
+        self._f0 = f0[0]
+        self._safe_mode = safe_mode
 
     def __len__(self):
         return len(self.signatures)
@@ -881,6 +1067,8 @@ class VISet(DataSet, BackupMixin):
         elif isinstance(indexer, int):
             indexer = [indexer]
             just_signature = True
+        else:
+            raise ValueError
 
         indexer = np.asarray(indexer)
         assert len(indexer.shape) == 1
@@ -889,9 +1077,11 @@ class VISet(DataSet, BackupMixin):
             assert len(indexer) == len(self)
             indexer = np.argwhere(indexer).ravel()
 
+        # TODO check for data mutability
         signatures = [self.signatures[i] for i in indexer]
 
         if len(signatures) == 0:
+            # TODO return empty set
             return None
 
         if just_signature:
