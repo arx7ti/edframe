@@ -518,15 +518,18 @@ class TestVI(test.TestCase):
         for vi in self.signatures:
             vi = sum(vi)
 
-            for n in rng.randint(0, vi.n_components, N_CHOICES):
+            for n in rng.choice(vi.n_components, N_CHOICES):
+                n = rng.choice(vi.n_components, n, replace=False)
                 vi_ = vi.drop(n)
 
-                if vi.n_components == 1:
+                if vi.n_components == len(n):
                     self.assertTrue(vi_.is_empty())
                 else:
-                    self.assertEqual(vi_.n_components, vi.n_components - 1)
-                    apps = vi.appliances
-                    apps.pop(n)
+                    apps = [
+                        a for i, a in enumerate(vi.appliances) if i not in n
+                    ]
+                    self.assertEqual(vi_.n_components,
+                                     vi.n_components - len(n))
                     self.assertEqual(vi_.appliances, apps)
 
     def test_hash(self):
