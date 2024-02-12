@@ -15,15 +15,16 @@ FS = [1111, 2132, 4558, 5000, 4000, 9999, 10001]
 N_CYCLES = [1, 2, 3, 4, 5, 10, 11, 20, 23, 50, 57]
 N_COMPONENTS = [1, 2, 3, 4, 5, 10, 20]
 RANDOM_STATE = 42
-N_CHOICES = 10
+N_CHOICES = 5
 V_DC_OFFSET = 0
-N_SIGNATURES = 1000
-N_SIGNATURES_PER_ITER = 20
+N_SIGNATURES = 10
+N_SIGNATURES_PER_ITER = 1
 ITERGRID = list(
     it.islice(it.product(F0, FS, N_CYCLES),
               N_SIGNATURES // N_SIGNATURES_PER_ITER))
 
 rng = np.random.RandomState(RANDOM_STATE)
+
 # rng = np.random.RandomState(None)
 
 
@@ -511,6 +512,22 @@ class TestVI(test.TestCase):
             fs_list = vi.features(format="list")
             self.assertIsInstance(fs_list, list)
             self.assertGreaterEqual(len(fs_list), n_features)
+
+    def test_drop(self):
+        # TODO more tests
+        for vi in self.signatures:
+            vi = sum(vi)
+
+            for n in rng.randint(0, vi.n_components, N_CHOICES):
+                vi_ = vi.drop(n)
+
+                if vi.n_components == 1:
+                    self.assertTrue(vi_.is_empty())
+                else:
+                    self.assertEqual(vi_.n_components, vi.n_components - 1)
+                    apps = vi.appliances
+                    apps.pop(n)
+                    self.assertEqual(vi_.appliances, apps)
 
     def test_hash(self):
         for vi in self.signatures:

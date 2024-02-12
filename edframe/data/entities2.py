@@ -468,7 +468,12 @@ class VI(Recording, BackupMixin):
 
             data__.append(data_ if len(data_) > 0 else None)
 
-        return tuple(data__)
+        data__ = tuple(data__)
+
+        if len(data__) > 1:
+            return data__
+
+        return data__[0]
 
     def __add__(self, vi):
         return self.add(vi)
@@ -842,6 +847,28 @@ class VI(Recording, BackupMixin):
             raise ValueError
 
         return data
+
+    def drop(self, ids):
+        if not hasattr(ids, '__len__'):
+            ids = [ids]
+
+        v, i, appliances = self._drop_components(ids, *self.data,
+                                                 self.appliances)
+
+        if v is None:
+            return VIEmpty(self.fs, self.f0, self.n_samples)
+
+        if self.has_locs():
+            locs = self._drop_components(ids, self.locs)
+        else:
+            locs = None
+
+        return self.new(v,
+                        i,
+                        self.fs,
+                        self.f0,
+                        appliances=appliances,
+                        locs=locs)
 
     def hash(self):
         return hash(self.data.tobytes()) & 0xFFFFFFFFFFFFFFFF
