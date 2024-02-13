@@ -19,7 +19,7 @@ from datetime import datetime
 from pickle import HIGHEST_PROTOCOL
 from .decorators import feature, safe_mode, check_empty
 from ..features import fundamental, spectrum, thd, spectral_centroid, temporal_centroid, rms
-from ..utils.exceptions import NotEnoughCycles, SingleCycleOnly, OrthogonalsMismatch,NSamplesMismatch, SamplingRateMismatch, MainsFrequencyMismatch
+from ..utils.exceptions import NotEnoughCycles, SingleCycleOnly, OrthogonalsMismatch, NSamplesMismatch, SamplingRateMismatch, MainsFrequencyMismatch
 from ..signals import FITPS, downsample, upsample, fryze, budeanu, extrapolate, pad
 from ..utils.common import nested_dict
 
@@ -451,7 +451,7 @@ class VI(Recording, BackupMixin):
                 drop, v, i, appliances, locs)
 
         if v is None or i is None:
-            return VIEmpty(self.fs, self.f0, self.n_samples)
+            return self.empty()
 
         return self.new(v,
                         i,
@@ -492,7 +492,7 @@ class VI(Recording, BackupMixin):
                                                  self.appliances)
 
         if v is None:
-            return VIEmpty(self.fs, self.f0, self.n_samples)
+            return self.empty()
 
         if self.has_locs():
             locs = self._drop_components(ids, self.locs)
@@ -513,12 +513,15 @@ class VI(Recording, BackupMixin):
         return self.add(vi)
 
     def add(self, vi):
+        if self.is_empty() and vi.is_empty():
+            return self.empty()
+
         # FIXME
         if isinstance(vi, int) and vi == 0:
             return self
 
         if self.n_orthogonals != vi.n_orthogonals:
-            raise OrthogonalsMismatch 
+            raise OrthogonalsMismatch
 
         if self.n_samples != vi.n_samples:
             raise NSamplesMismatch
@@ -529,7 +532,8 @@ class VI(Recording, BackupMixin):
         if self.f0 != vi.f0:
             raise MainsFrequencyMismatch
 
-        data1, data2 = self.data, vi.data
+        data1 = np.zeros_like(vi.data) if self.is_empty() else self.data
+        data2 = np.zeros_like(self.data) if vi.is_empty() else vi.data
         v, i = np.concatenate((data1, data2), axis=1)
         appliances = self.appliances + vi.appliances
 
@@ -537,7 +541,6 @@ class VI(Recording, BackupMixin):
 
         if self._require_components and vi._require_components:
             locs = np.concatenate((self.locs, vi.locs))
-
             assert len(appliances) == len(locs)
         else:
             v = self.__vaggrule__(v, keepdims=True)
@@ -560,7 +563,7 @@ class VI(Recording, BackupMixin):
     def resample(self, fs, **kwargs):
         # TODO critical sampling rate condition
         if self.is_empty():
-            return self.new(fs, self.f0, self.n_samples)
+            return self.empty()
 
         if fs == self.fs:
             return self.copy()
@@ -595,7 +598,7 @@ class VI(Recording, BackupMixin):
         cycle-wise roll 
         '''
         if self.is_empty() or n > self.n_samples:
-            return self.new(self.fs, self.f0, self.n_samples)
+            return self.empty()
         elif n == 0:
             return self.new(self.vc,
                             self.ic,
@@ -650,7 +653,7 @@ class VI(Recording, BackupMixin):
         n = self._adjust_delta(n)
 
         if self.is_empty():
-            return self.new(self.fs, self.f0, sum(n) + self.n_samples)
+            return self.empty()
 
         locs = self.locs if self.has_locs() else None
         dims = self.n_components, self.n_orthogonals, -1
@@ -693,7 +696,7 @@ class VI(Recording, BackupMixin):
         n = self._adjust_delta(n)
 
         if self.is_empty():
-            return self.new(self.fs, self.f0, sum(n) + self.n_samples)
+            return self.empty()
 
         dims = self.n_components, self.n_orthogonals, -1
 
@@ -719,7 +722,7 @@ class VI(Recording, BackupMixin):
 
     def cycle(self, mode='mean'):
         if self.is_empty():
-            return self.new(self.fs, self.f0, self.n_samples)
+            return self.empty()
 
         if mode == 'mean':
             v, i = np.mean(self.datafold, axis=-2)
@@ -743,7 +746,7 @@ class VI(Recording, BackupMixin):
 
     def unitscale(self):
         if self.is_empty():
-            return self.new(self.fs, self.f0, self.n_samples)
+            return self.empty()
 
         v = self.vc / abs(self.v).max()
         i = self.ic / abs(self.i).max()
@@ -761,7 +764,7 @@ class VI(Recording, BackupMixin):
         v, i = self.data
 
         if self.is_empty():
-            return self.new(self.fs, self.f0, self.n_samples)
+            return self.empty()
 
         if self.n_orthogonals > 1:
             v, i = v[:, 0, None], i.sum(1, keepdims=True)
@@ -784,7 +787,7 @@ class VI(Recording, BackupMixin):
         v, i = self.data
 
         if self.is_empty():
-            return self.new(self.fs, self.f0, self.n_samples)
+            return self.empty()
 
         if self.n_orthogonals > 1:
             v, i = v[:, 0, None], i.sum(1, keepdims=True)
@@ -930,14 +933,17 @@ class VI(Recording, BackupMixin):
 
         return cls(v, i, fs=fs, is_synced=False)
 
+    def empty(self):
+        return VIEmpty(self.fs, self.f0)
+
 
 class VIEmpty(VI):
     '''
     A lazy and empty signal
     '''
 
-    def __init__(self, fs, f0, n_samples=0) -> None:
-        v, i = np.zeros((2, 0, 0, n_samples))
+    def __init__(self, fs, f0) -> None:
+        v, i = np.zeros((2, 0, 0, 0))
         super().__init__(v, i, fs, f0)
         self._is_empty = True
 

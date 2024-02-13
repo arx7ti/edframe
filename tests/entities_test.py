@@ -17,8 +17,8 @@ N_COMPONENTS = [1, 2, 3, 4, 5, 10, 20]
 RANDOM_STATE = 42
 N_CHOICES = 5
 V_DC_OFFSET = 0
-N_SIGNATURES = 10
-N_SIGNATURES_PER_ITER = 1
+N_SIGNATURES = 100
+N_SIGNATURES_PER_ITER = 3
 ITERGRID = list(
     it.islice(it.product(F0, FS, N_CYCLES),
               N_SIGNATURES // N_SIGNATURES_PER_ITER))
@@ -563,6 +563,15 @@ class TestVI(test.TestCase):
             self.assertNotEqual(id(d['v']), id(vi.v))
             self.assertNotEqual(id(d['i']), id(vi.i))
             self.assertNotEqual(id(d['locs']), id(vi.locs))
+
+    def test_empty(self):
+        for vi in self.signatures:
+            vi = sum(vi)
+            vi_ = vi.empty()
+
+            self.assertEqual(vi_.data.size, 0)
+            self.assertEqual(vi_.fs, vi.fs)
+            self.assertEqual(vi_.f0, vi.f0)
 
 
 class TestVISet(test.TestCase):
