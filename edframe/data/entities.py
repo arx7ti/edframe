@@ -1,1654 +1,1246 @@
 from __future__ import annotations
-from tqdm import tqdm
-from beartype import abby
-from ..signals import FITPS
-from copy import copy, deepcopy
-from collections import defaultdict
-from beartype.typing import Iterable
-from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import MultiLabelBinarizer
-from typing import Optional, Callable, Union, Any, Iterable
-from edframe.signals import pad, roll, extrapolate, replicate, upsample, downsample, crop
 
-# import torch
+import os
+import math
+import pickle
 import random
-import inspect
 import numpy as np
 import pandas as pd
 import itertools as it
+from copy import deepcopy
+from numbers import Number
+from inspect import isfunction
+from collections import defaultdict
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import MultiLabelBinarizer
+from statsmodels.tools.sm_exceptions import MissingDataError
+
+from datetime import datetime
+from pickle import HIGHEST_PROTOCOL
+from .decorators import feature, safe_mode, check_empty
+from ..features import fundamental, spectrum, thd, spectral_centroid, temporal_centroid, rms
+from ..utils.exceptions import NotEnoughCycles, SingleCycleOnly, OrthogonalsMismatch, NSamplesMismatch, SamplingRateMismatch, MainsFrequencyMismatch
+from ..signals import FITPS, downsample, upsample, fryze, budeanu, extrapolate, pad
+from ..utils.common import nested_dict
 
 
-class Generic:
+class Recording:
+    __recording_type__ = None
+
+    @property
+    def typeof(self):
+        return self.__recording_type__
+
+    @property
+    def n_channels(self):
+        return self.data.shape[0]
+
+    @property
+    def n_components(self):
+        if self.is_empty():
+            return 0
+
+        return self.data.shape[1]
+
+    @property
+    def feature_names(self):
+        features = sorted([
+            k for k, v in self.__class__.__dict__.items()
+            if getattr(v, 'is_feature', False)
+        ])
+
+        return list(features)
+
+    @property
+    def n_features(self):
+        return len(self.feature_names)
+
+    @property
+    def fs(self):
+        return self._fs
+
+    @property
+    def data(self):
+        return self._data
 
     @classmethod
     def new(cls, *args, **kwargs):
         return cls(*args, **kwargs)
 
-    # __verbose__ = "{cls}()"
+    def __init__(self, data, fs, appliances=None, locs=None) -> None:
+        if isinstance(appliances, str | int):
+            appliances = [appliances]
 
-    # def __str__(self):
-    #     return self.__verbose__.format(cls=self.__class__.__name__)
+        has_apps = appliances is not None and hasattr(appliances, '__len__')
+        has_locs = locs is not None and hasattr(locs, '__len__')
 
-    # def __repr__(self):
-    #     return str(self)
+        if has_locs:
+            locs = np.asarray(locs)
+            assert len(locs.shape) == 2
 
-    def __backref__(self, **kwargs):
-        for k, v in inspect.getmembers(self):
-            if inspect.isclass(v):
-                if issubclass(v, Backref):
-                    data = kwargs.get(k, None)
-                    setattr(self, k, v(backref=self, data=data))
+        if has_apps and has_locs:
+            assert len(locs) == len(appliances)
 
-    def properties(self):
-        properties = [
-            p for p in dir(self.__class__)
-            if isinstance(getattr(self.__class__, p), property)
-        ]
-        return properties
-
-    def update(self, **kwargs):
-
-        cls = self.__class__
-        inst = cls.__new__(cls)
-        state_dict = {}
-
-        for p, v in self.__dict__.items():
-            if p in kwargs:
-                v = kwargs[p]
-                kwargs.pop(p)
-            else:
-                # TODO time & memory tests
-                v = copy(v)
-                # v = deepcopy(v)
-
-            if isinstance(v, Backref):
-                # TODO check
-                v.backref = inst
-
-            state_dict.update({p: v})
-
-        inst.__dict__.update(state_dict)
-
-        properties = self.properties()
-
-        for p, v in kwargs.items():
-            if p in properties:
-                setattr(inst, p, v)
-
-        return inst
-
-    def copy(self):
-        return self.update()
-
-    def withbackrefs(self):
-
-        kk = []
-
-        for k, v in self.__dict__.items():
-            if issubclass(v, Backref):
-                kk.append(k)
-
-        return kk
-
-
-class Backref(Generic):
-
-    __default_data__ = None
-
-    # TODO get source attr by method
-    # ___attr__ = None
-
-    def __before__(self, backref, data=None):
-        pass
-
-    def __after__(self, backref, data=None):
-        pass
-
-    def __init__(
-        self,
-        backref: Optional[PowerSample],
-        data: Optional[Any] = None,
-    ) -> None:
-
-        self.__before__(backref, data=data)
-
-        self._backref = backref
-
-        if data is None:
-            self._data = self.__default_data__
-        else:
-            self._data = data
-
-        self.__after__(backref, data=data)
-
-    @property
-    def backref(self):
-        return self._backref
-
-    @backref.setter
-    def backref(self, backref):
-        self._backref = backref
-
-    @property
-    def data(self):
-        return self._data
-
-    @data.setter
-    def data(self, data):
+        # User-defined data
         self._data = data
+        self._fs = fs
+        self._appliances = appliances
+        self._locs = locs
 
-    @property
-    def related_name(self) -> str:
-        for k, v in self.backref.__dict__.items():
-            if isinstance(v, self.__class__):
-                return k
+        # Default attributes
+        self._require_components = True
+        self._is_empty = False
 
-    @property
-    def values(self) -> np.ndarray:
+    def is_empty(self):
+        return self._is_empty
+
+    def empty(self):
         raise NotImplementedError
 
-    # def new(self):
-    #     return self.__class__(backref=self.backref, data=None)
-
-    def update(self, **kwargs):
-        x = super().update(backref=self.backref, **kwargs)
-        return x
-
-    def to_numpy(self):
-        return np.asarray(self.values)
-
-    def to_torch(self):
-        return torch.Tensor(self.values)
-
-    def clear(self):
-        return self.update(data=self.__default_data__)
-
-
-class AttributeExtractors(Backref):
-
-    @property
-    def values(self):
-        values = [getattr(self, n) for n in self.names]
-        return values
-
-    def __after__(self, _, data):
-        names = []
-
-        for extractor in data:
-            if inspect.isclass(extractor):
-                attr_name = extractor.__name__
-            else:
-                attr_name = extractor.__class__.__name__
-
-            attr_name = attr_name.split('.')[-1]
-
-            # if extractor.is_estimator():
-            #     attr_value = extractor.estimator
-            # else:
-            #     attr_value = extractor.transform
-            # setattr(self, attr_name, attr_value)
-
-            setattr(self, attr_name, extractor)
-            names.append(attr_name)
-
-        self.names = names
-
-    def __str__(self) -> str:
-        ann = "Extractors(%s)" % ", ".join(self.names)
-        return ann
-
-    def __repr__(self) -> str:
-        return str(self)
-
-    def __getitem__(self, indexer):
-        attr_names = self._get_attr_names(indexer)
-        extractors = [getattr(self, n) for n in attr_names]
-
-        if isinstance(indexer, Iterable):
-            return self.update(data=extractors)
+    def require_components(self, required=True):
+        if required:
+            rec = self.copy()
         else:
-            extractor = getattr(self, attr_names[0])
-            return extractor
+            rec = self.aggregate()
 
-    def _get_attr_name(self, indexer):
-        if isinstance(indexer, int):
-            if indexer > 0 and indexer < len(self.names):
-                attr_name = self.names[indexer]
-            else:
-                raise ValueError
-        elif isinstance(indexer, str):
-            if indexer in self.names:
-                attr_name = indexer
-            else:
-                raise ValueError
+        rec._require_components = required
 
-        return attr_name
+        return rec
 
-    def _get_attr_names(self, indexer):
-        attr_names = []
-
-        if isinstance(indexer, Iterable):
-            for i in indexer:
-                attr_names.append(self._get_attr_name(i))
-        else:
-            attr_names.append(self._get_attr_name(indexer))
-
-        return attr_names
-
-    def pop(self, indexer):
-        attr_name = self._get_attr_name(indexer)
-        e = getattr(self, attr_name)
-        delattr(self, attr_name)
-        self.names.pop(self.names.index(attr_name))
-        return e
-
-    def drop(self, indexer):
-        attr_names = self._get_attr_names(indexer)
-        extractors = [getattr(self, n) for n in attr_names]
-        return self.update(data=extractors)
-
-
-class BackrefDataFrame(Backref):
-
-    __default_data__ = pd.DataFrame()
-
-    # __verbose__ = "{cls}({values})"
-
-    # def __str__(self):
-    #     return self.__verbose__.format(cls=self.__class__.__name__,
-    #                                    values=self.values)
-    # def __init__(self, backref: PowerSample | None, data: Any | None = None) -> None:
-    #     super().__init__(backref, data)
-
-    def __after__(self, *args, **kwargs):
-        # TODO handle extractors in the old methods
-        self._extractors = []
-
-    def __getitem__(
-        self,
-        *indexer: Iterable[int | str],
-    ) -> Backref:
-        # TODO if not Iterable then item only
-
-        if len(indexer) == 2:
-            rows, cols = indexer
-        elif len(indexer) == 1:
-            rows = slice(None, None, None)
-            cols = indexer
-        else:
-            raise ValueError
-
-        # TODO fix Iterable[...]
-        if abby.is_bearable(rows, Iterable[int]) and abby.is_bearable(
-                cols, Iterable[str]):
-            values = self.data.loc[rows, cols]
-        elif abby.is_bearable(rows, Iterable[int]) and abby.is_bearable(
-                cols, Iterable[int]):
-            values = self.data.iloc[rows, cols]
-        else:
-            raise ValueError
-
-        return self.update(data=values)
-
-    def __len__(self):
-        return len(self.data)
-
-    @property
-    def values(self):
-        return self.data.values
-
-    @property
-    def names(self):
-        """
-        Alias for self.keys
-        """
-        return self.data.columns.values
-
-    @property
-    def extractors(self):
-        return AttributeExtractors(self, data=self._extractors)
-
-    def _check_callables(self, fs):
-        pass
-
-    def count(self):
-        return len(self.names)
-
-    def pop(self, name: str) -> pd.Series:
-        item = self.data.pop(name)
-        idx = self.names.index(name)
-        self.extractors.pop(idx)
-        return item
-
-    def drop(self, names: Iterable[str]) -> BackrefDataFrame:
-        values = self.data.drop(names, axis=1)
-        extractors = self.extractors.drop(names).values
-        return self.update(data=values, _extractors=extractors)
-
-    def stack(self, inst: BackrefDataFrame) -> BackrefDataFrame:
-        df = pd.concat((self.data, inst.data), axis=1)
-        extractors = self.extractors.values + inst.extractors.values
-        return self.update(data=df, _extractors=extractors)
-
-    # def (self, inst: BackrefDataFrame) -> BackrefDataFrame:
-
-    # df = pd.concat((self.data, inst.data), axis=1)
-
-    # return self.update(data=df)
-
-    # def to_dataframe(self):
-    #     return self.data
-
-
-# TODO not DataFrame, but dict[timestamp, list[event.verbose_name]]
-class Events(Backref):
-
-    @property
-    def data(self) -> pd.DataFrame:
-        return self._data
-
-    @data.setter
-    def data(self, data):
-        self._data = data
-
-    @property
-    def extractors(self):
-        return AttributeExtractors(self, data=self._extractors)
-
-    def __call__(self, *args, **kwargs) -> BackrefDataFrame:
-        return self.detect(*args, **kwargs)
-
-    def __after__(self, *args, **kwargs):
-        self._extractors = []
-
-    def detect(
-        self,
-        fns: Callable | Iterable[Callable],
-        source_name: Optional[str] = None,
-    ) -> BackrefDataFrame:
-        # self._check_callables(fns)
-
-        data = defaultdict(list)
-
-        for fn in fns:
-            if source_name is not None:
-                fn.source_name = source_name
-
-            events = fn(self.backref)
-
-            for loc, sign in events:
-                data[loc].append((fn.verbose_name, sign))
-
-        data = dict(data)
-
-        return self.update(data=data, _extractors=list(fns))
-
-    def to_features(self) -> Features:
+    def aggregate(self):
         raise NotImplementedError
 
 
-class Features(BackrefDataFrame):
+class BackupMixin:
 
-    # TODO onchange
-    @property
-    def data(self) -> pd.DataFrame:
-        return self._data
+    def save(self, filepath=None, make_dirs=False):
+        if filepath is None:
+            today = datetime.now().date()
+            filename = f'{self.__class__.__name__}-{today}-H{self.hash()}.pkl'
+            filepath = os.path.join(os.getcwd(), filename)
+        elif make_dirs:
+            dirpath = os.path.dirname(filepath)
+            os.makedirs(dirpath, exist_ok=True)
 
-    @data.setter
-    def data(self, values: pd.DataFrame):
-        if isinstance(values, pd.DataFrame):
-            self._data = values
-        else:
-            raise ValueError
+        with open(filepath, 'wb') as fb:
+            pickle.dump(self, fb, protocol=HIGHEST_PROTOCOL)
 
-    @property
-    def values(self) -> np.ndarray:
-        return self.data.values
+    @classmethod
+    def load(cls, filepath):
+        with open(filepath, 'rb') as fb:
+            instance = pickle.load(fb)
 
-    def __call__(self, fns: Callable | Iterable[Callable]) -> BackrefDataFrame:
-        return self.extract(fns)
-
-    def add(self, features: Events | Features) -> Features:
-
-        if self.backref == features.backref:
-            if isinstance(features, Events):
-                values = self.stack(features.to_features())
-            elif isinstance(features, Features):
-                values = self.stack(features)
-            else:
-                raise ValueError
-        else:
-            raise ValueError
-
-        return self.update(data=values)
-
-    def extract(self, fns: Callable | Iterable[Callable]) -> BackrefDataFrame:
-        if not isinstance(fns, Iterable):
-            fns = [fns]
-
-        dfs = []
-
-        for fn in fns:
-            # TODO Must be feature
-            df = fn(self.backref)
-            dfs.append(df)
-            del df
-
-        df = pd.concat(dfs, axis=1)
-
-        d = self.update(data=df, _extractors=list(fns))
-        return d
-        # TODO prop estimators
+        return instance
 
 
-class Components(Backref):
-    """
-    All methods except pop and setitem produce new copies with inherited legacy from the previous object
-    """
-
-    __verbose__ = "{cls}(N={nc})"
-
-    @property
-    def __default_data__(self):
-        return np.empty((0, *self.backref.values.shape))
-
-    # def _check_values(values):
-    #     if not abby.is_bearable(values, (list[np.ndarray],\
-    #             tuple[np.ndarray, ...], np.ndarray, Components, PowerSample)):
-    #         raise ValueError
-
-    def __str__(self):
-        return self.__verbose__.format(cls=self.__class__.__name__,
-                                       nc=self.count())
-
-    # def __init__(self, backref: PowerSample) -> None:
-    #     # TODO why not backref? what will happen if components from different power samples?
-    #     super(Components, self).__init__(backref)
-    #     # TODO Can't add components of different types
-    #     # TODO Can't add components of different sampling rates
-    #     # self._check_values(values)
-
-    def __after__(self, *args, **kwargs):
-        self._is_allowed_transform = False
-
-    def __getitem__(
-        self, indexer: np.ndarray | list[int] | set[int] | tuple[int, ...]
-    ) -> Backref:
-        data = self.data[indexer]
-        return self.update(data=data)
-
-    def __len__(self):
-        return len(self.data)
-
-    @property
-    def data(self) -> np.ndarray:
-        if (len(self._data) == 0 and self.backref.labels is None)\
-            or (len(self._data) == 0 and self.backref.labels is not None):
-
-            return self.backref.values[None]
-
-        return self._data
-
-    @data.setter
-    def data(
-        self,
-        values: Union[np.ndarray, list[np.ndarray], set[np.ndarray],
-                      tuple[np.ndarray, ...]],
-    ) -> None:
-
-        if abby.is_bearable(
-                values,
-            (list[np.ndarray], set[np.ndarray], tuple[np.ndarray, ...])):
-            values = np.stack(values, axis=0)
-        elif not isinstance(values, np.ndarray):
-            raise ValueError
-        # TODO all relations to the labels in backref.labels
-
-        self._data = values
-
-    @property
-    def values(self):
-        return self.data
-
-    def count(self):
-        if len(self._data) == 0 and self.backref.labels is None:
-            return 1
-
-        if len(self._data) == 0 and self.backref.labels is not None:
-            return len(self.backref.labels)
-
-        return len(self._data)
-
-    def allow_transform(self, status: bool = True):
-        self._is_allowed_transform = status
-
-    def is_allowed_transform(self):
-        return self._is_allowed_transform
-
-    def add(self, components: Components):
-        if isinstance(components, Components):
-            data = np.concatenate((self.data, components.data), axis=0)
-        elif isinstance(components, np.ndarray):
-            data = np.concatenate((self.data, components), axis=0)
-        else:
-            raise ValueError
-
-        return self.update(data=data)
-
-    # def apply(
-    #     self,
-    #     fs: Callable | Iterable[Callable | tuple[int, Callable] | None],
-    # ) -> Components:
-    #     if self.is_allowed_transform():
-    #         if isinstance(fs, Callable):
-    #             data = np.apply_along_axis(fs, axis=0, arr=self.data)
-    #         elif abby.is_bearable(
-    #                 fs, Iterable[Callable | tuple[int, Callable] | None]):
-    #             if abby.is_bearable(fs, Iterable[Callable | None]):
-    #                 fs = enumerate(fs)
-    #                 fs = [None if f is None else (i, f) for i, f in fs]
-    #                 if len(fs) != self.count():
-    #                     raise ValueError
-    #             elif not abby.is_bearable(fs, Iterable[tuple[int, Callable]]):
-    #                 raise ValueError
-
-    #             data = np.empty_like(self.data)
-    #             mask = np.ones(self.count(), dtype=bool)
-
-    #             for _fs in fs:
-    #                 if _fs is not None:
-    #                     i, f = _fs
-    #                     data[i] = f(self.data[i])
-    #                     mask[i] = False
-
-    #             data[mask] = self.data[mask]
-    #         else:
-    #             raise ValueError
-    #     else:
-    #         raise AttributeError("Transformation is not allowed")
-
-    #     return self.update(data=data)
-
-    def map(
-        self,
-        f: Callable,
-        *args,
-        **kwargs,
-    ) -> list[Any]:
-        values = []
-
-        for v in self.data:
-            values.append(f(v, *args, **kwargs))
-
-        return values
-
-    def agg(self, rule: str = "+"):
-        if rule == "+":
-            values = np.sum(self.values, axis=0)
-        else:
-            raise ValueError
-
-        return self.backref.update(values=values, clear_components=True)
-
-
-class LockedError(Exception):
+class L(Recording):
     pass
 
 
-class GenericState:
+class VI(Recording, BackupMixin):
+    '''
+    Assumes a whole number of cycles and synchronized voltage 
+    '''
+    __recording_type__ = 'high_sampling_rate'
 
-    def __init__(self) -> None:
-        self._locked = False
-        self._msg = ""
+    # TODO empty signal
 
-    def is_locked(self):
-        return self._locked
+    def __source__(self):
+        '''
+        Source signal used for features calculation
+        '''
 
-    def raise_error(self):
-        raise LockedError(self._msg)
+        return self.s
 
-    def lock(self, msg=None):
-        msg = "" if msg is None else msg
-        self._locked = True
-        self._msg = msg
-        self.raise_error()
+    @staticmethod
+    def __iaggrule__(i, keepdims=False):
+        return i.sum((0, 1), keepdims=keepdims)
 
-    def unlock(self):
-        self._locked = False
-        self._msg = ""
-
-    def verify(self):
-        if self.is_locked():
-            self.raise_error()
-
-
-class PowerSample(Generic):
-    # TODO about named vars, v,i, p etc. to be used further e.g. from Features
-
-    events: Events = Events
-    features: Features = Features
-    components: Components = Components
-    __low__: bool = False  # TODO add check
-    __high__: bool = False
-
-    class State(GenericState):
-
-        @classmethod
-        def check(cls, method: Callable):
-
-            def wrapper(self, *args, **kwargs):
-                if not issubclass(self.__class__, PowerSample):
-                    raise ValueError("Argument \"self\" is required")
-
-                self.state.verify()
-
-                labels = self.labels
-                appliances = self.appliances
-                locs = self.locs
-                components = self.components
-
-                msg = cls._get_msg_lengths(labels=labels,
-                                           appliances=appliances,
-                                           locs=locs,
-                                           components=components)
-                if msg is not None:
-                    self.state.lock("Parameter(-s) %s" % msg)
-
-                return method(self, *args, **kwargs)
-
-            return wrapper
-
-        @classmethod
-        def check_init_args(cls, method):
-
-            def wrapper(*args, **kwargs):
-                labels = kwargs.get("labels", None)
-                appliances = kwargs.get("appliances", None)
-                locs = kwargs.get("locs", None)
-                components = kwargs.get("components", None)
-
-                msg = cls._get_msg_lengths(labels=labels,
-                                           appliances=appliances,
-                                           locs=locs,
-                                           components=components)
-                if msg is not None:
-                    raise ValueError("Argument(-s) %s" % msg)
-
-                return method(*args, **kwargs)
-
-            return wrapper
-
-        @staticmethod
-        def _get_msg_lengths(
-            labels=None,
-            appliances=None,
-            locs=None,
-            components=None,
-        ) -> Union[str, None]:
-            lengths = {}
-
-            if labels is not None:
-                lengths.update(labels=len(labels))
-
-            if appliances is not None:
-                lengths.update(appliances=len(appliances))
-
-            if locs is not None:
-                lengths.update(locs=len(locs))
-
-            if components is not None:
-                if len(components) > 0:
-                    lengths.update(components=len(components))
-
-            if len(lengths) > 1:
-                vs = np.asarray(list(lengths.values()))
-
-                if not np.all(vs[1:] == vs[0]):
-                    msg = "%s must have the same length" % (", ".join(
-                        map(lambda x: "\"%s\"" % x, lengths.keys())))
-
-                    return msg
-
-    @State.check_init_args
-    def __init__(
-        self,
-        data,
-        fs: Optional[int] = None,
-        fs_type: str = "high",
-        f0: float = None,
-        labels: Optional[Union[list[str], dict[str, float],
-                               list[int, float]]] = None,
-        appliances: Optional[list[str]] = None,
-        locs: Optional[np.ndarray] = None,
-        components: Optional[list[PowerSample]] = None,
-        aggregation: Optional[str] = '+',
-        sort: bool = False,
-    ) -> None:
-        """
-            y: can be either appliance(-s), or state(-s) of appliance(-s), or share(-s) of appliance(-s)
-            components: stand for appliance power profile
-            locs: stand for events locations
-        """
-
-        if sort and appliances is not None:
-            order = np.argsort(appliances)
-            appliances = appliances[order]
-            if labels is not None:
-                labels = labels[order]
-            if locs is not None:
-                locs = locs[order]
-            if components is not None:
-                components = components[order]
-
-        # self.check_laziness(x, components)
-        # self.check_components(components)
-        # self.check_locs(locs)
-        # self.check_y(y)
-
-        self._data = data
-        self._fs = fs
-        self._fs_type = fs_type
-        self._f0 = f0
-        self._labels = labels
-        self._appliances = appliances
-        self._locs = locs
-        self._aggregation = aggregation
-
-        self.__backref__(components=components)
-
-        self.state = self.State()
-        # self._lmask = None
-
-    def __len__(self):
-        return len(self.values)
-
-    def is_lazy(self):
-        return self.data is None
-
-    @property
-    def data(self):
-        return self._data
-
-    @data.setter
-    def data(self, data):
-        self._data = data
+    @staticmethod
+    def __vaggrule__(v, keepdims=False):
+        return v.mean((0, 1), keepdims=keepdims)
 
     @property
     def f0(self):
         return self._f0
 
     @property
-    def fs(self):
-        return self._fs
-
-    @fs.setter
-    def fs(self, fs):
-        self._fs = fs
-
-    @property
-    def locs(self):
-        if self._locs is not None:
-            return self._locs
-
-        # NOTE if n_labels = 0 and aggregated with n_labels > 0
-        return np.asarray([[0, len(self.values)]] * max(1, self.n_labels))
-
-    @property
-    def n_labels(self):
-        if self.labels is None:
-            return 0
-
-        return len(self.labels)
-
-    @property
-    def appliances(self):
-        return self._appliances
-
-    @property
-    def labels(self):
-        return self._labels
-
-    @labels.setter
-    def labels(self, labels) -> None:
-        self._labels = labels
-
-    @property
-    def label(self):
-        if self.labels is not None:
-            if len(self.labels) > 1:
-                raise AttributeError
-
-        return self._labels[0]
-
-    # def labels(self):
-    #   if abby.is_bearable(self.labels, list[str]):
-    #     return self.labels
-    # def new_labels(self):
-    # TODO 1. if no labels but appliances
-    # TODO 2. if no labels, but appliances and components
-    # def update_labels(self, labels=None, comap: Callable=None, **kwargs):
-    # TODO check arguments
-    #   if comap is not None and labels is None:
-    #     labels = self.components.map(comap, **kwargs)
-    #   return self.update(labels=labels)
-    # TODO 3. if labels
-    # TODO 4. if labels and components
-
-    @State.check
-    # FIXME not working if np.random.choice(dataset, n)
-    def __getitem__(self, ab: slice):
-        if not isinstance(ab, slice):
-            raise ValueError
-
-        # components = self.components
-
-        # FIXME
-        a = 0 if ab.start is None else ab.start
-        b = self.data.shape[-1] if ab.stop is None else ab.stop
-
-        b = np.minimum(b, self.locs[:, 1])
-        locs0 = np.maximum(0, self.locs[:, 0] - a)
-        locs0 = np.clip(locs0, a_min=0, a_max=b - a)
-        locs = np.column_stack((locs0, b - a))
-        mask = np.diff(locs, axis=1).ravel() > 0
-        locs = locs[mask]
-        # TODO in case of future another roll? if it will become zero
-        # e.g. now half is rolled and label is kept, how to deal with further roll
-        # solution must be automatic, i.e. label drop if overrolled
-        labels = [self.labels[i] for i in np.argwhere(mask).ravel()]
-
-        # if np.any((locs[:, 1] - locs[:, 0]) < 160):
-        #     print('\n>>>', ab, '\n\n', self.locs, '\n\n', locs, '>>>\n')
-        # else:
-        # locs = self.locs
-        # print('>',locs, labels, components.count())
-
-        # TODO
-        components = self.components
-        if components.count() > 0:
-            idxs = [i for i in np.argwhere(mask).ravel()]
-            components = components[idxs, ab]
-
-        data = self.data[..., ab]
-
-        return self.update(data=data,
-                           _locs=locs,
-                           _labels=labels,
-                           components=components)
-
-    def isfullyfit(self):
-        return np.all((self.locs[:, 0] == 0) & (self.locs[:, 1] == len(self)))
-
-    # @State.check
-    # def apply(
-    #     self,
-    #     fns: Union[Callable, Iterable[Callable, F]],
-    #     # source_name: Optional[str]=None,
-    # ) -> PowerSample:
-    #     if not isinstance(fns, Iterable):
-    #         fns = [fns]
-
-    #     if len(fns) == 0:
-    #         raise ValueError
-
-    #     ps = self.copy()
-
-    #     for fn in fns:
-    #         if not isinstance(fn, F):
-    #             # TODO generalize F to features and events?
-    #             arg = tuple(inspect.signature(fn).parameters)[0]
-    #             # TODO values to data
-    #             fn = F(fn, ("values", ), **{arg: "values"})
-
-    #         # TODO must return signal
-    #         ps = fn(ps)
-
-    #         # if not is_signal(ps.)
-    #         # if not isinstance(ps.source(), np.ndarray):
-    #         #     raise ValueError
-    #         # elif len(ps)
-
-    #     return ps
-
-    def map(self, fns):
-        # TODO signal to custom value
-        pass
-
-    @property
-    def values(self) -> Any:
-        raise NotImplementedError
-
-    @values.setter
-    def values(self, values: Any) -> None:
-        raise NotImplementedError
-
-    def source(self, source_name: str):
-        return getattr(self, source_name)
-
-    def set_source(self, source_name: str, source_values: Any):
-        setattr(self, source_name, source_values)
-
-    def roi(self, a=None, b=None, roi=None) -> list[PowerSample]:
-        if a is not None and b is not None:
-            return self[a:b]
-
-        if roi is not None:
-            return roi.crop(self)
-
-    def crop(self, a: int, b: int) -> PowerSample:
-        # TODO generalize for ndarray data
-        data = crop(self.data, a, b)
-        return self.update(data=data)
-
-    def random_crop(self, dn: int) -> PowerSample:
-        if dn < 0:
-            raise ValueError
-
-        a = random.randint(0, dn - 1)
-        b = a + dn
-        return self.crop(a, b)
-
-    def pad(self, n: int) -> PowerSample:
-        data = pad(self.data, n)
-        return self.update(data=data)
-
-    @property
-    def timesize(self):
-        return len(self)
-
-    # @property
-    # def lmask(self):
-    #     return self._lmask
-
-    def haslocs(self):
-        return self._locs is not None
-
-    def roll(self, n: int) -> PowerSample:
-        raise NotImplementedError
-
-    def upsample(self, fs: int, kind: str = "linear") -> PowerSample:
-        if fs < self.fs:
-            raise ValueError
-
-        data = upsample(self.data, self.fs, fs, kind=kind)
-
-        return self.update(data=data, fs=fs)
-
-    def downsample(self, fs: int) -> PowerSample:
-        data = downsample(self.data, self.fs, fs)
-        return self.update(data=data, fs=fs)
-
-    def replicate(self, n: int) -> PowerSample:
-        data = replicate(self.data, n)
-        return self.update(data=data)
-
-    def extrapolate(self, n: int, lags: int = 10) -> PowerSample:
-        data = extrapolate(self.data, n, lags=lags)
-        return self.update(data=data)
-
-
-class VI(PowerSample):
-    __high__ = True
-
-    def reg_labels(self, target: str = "active"):
-        if self.components.count() == 0:
-            raise ValueError
-
-        if target == "active":
-            # FIXME resolve import issues
-            v = self.components.map(lambda x: rms(fryze(self.v, x)[0]))
-            labels = dict(zip(self.labels, v))
-            return self.update(labels=labels)
-        else:
-            raise ValueError
-
-    def __init__(
-        self,
-        v,
-        i,
-        fs,
-        f0: float = None,
-        labels: Optional[Union[list[str], dict[str, float]]] = None,
-        appliances: Optional[list[str]] = None,
-        locs: Optional[np.ndarray] = None,
-        components: Optional[np.ndarray] = None,
-        aggregation: Optional[str] = '+',
-        blind_zone: Optional[float] = 0.25,
-        **kwargs: Any,
-    ):
-        if len(v) != len(i):
-            raise ValueError
-
-        data = np.stack((v, i), axis=0)
-        super().__init__(data=data,
-                         fs=fs,
-                         fs_type="high",
-                         f0=f0,
-                         labels=labels,
-                         appliances=appliances,
-                         locs=locs,
-                         components=components,
-                         aggregation=aggregation,
-                         **kwargs)
-        self._blind_zone = blind_zone
-        self._rounded = False
-        self._sync = False or len(data.shape) == 3
-        self._period = None
-
-    def __add__(self, sample):
-        if isinstance(sample, VI):
-            return self.agg(sample)
-        else:
-            return self.update(i=self.i + sample)
-
-    def __radd__(self, sample):
-        if isinstance(sample, VI):
-            return self.agg(sample)
-        else:
-            return self.update(i=self.i + sample)
-
-    def agg(self, sample: VI) -> VI:
-        # TODO fix v update as well during transform
-        v = np.mean((self.v, sample.v), axis=0)
-        i = self.i + sample.i
-        labels = self.labels + sample.labels
-        locs = np.concatenate((self.locs, sample.locs))
-        # TODO assure that n locs == n labels
-        # components = np.stack((self.i, sample.i), axis=0)
-        # components = self.components.add()
-        components = self.components.add(sample.components)
-        return self.update(v=v,
-                           i=i,
-                           labels=labels,
-                           _locs=locs,
-                           components=components,
-                           _sync=self.is_sync() & sample.is_sync())
-
-    def is_sync(self):
-        return self._sync
-
-    def period(self, fmt: str = "samples"):
-        if not fmt == "samples":
-            raise NotImplementedError
-
-        return self._period
-
-    def is_rounded(self):
-        return self._rounded
-
-    def rounding(self, flag: bool = True) -> None:
-        if not self.is_sync():
-            raise ValueError
-
-        if self._blind_zone is None:
-            raise ValueError
-
-        return self.update(_rounded=flag)
-
-    @property
-    def locs(self):
-        locs = super().locs
-        # FIXME by request not automatic
-
-        if self.is_rounded():
-            p = self.period("samples")
-            visibility = 1. - locs % p / p
-            locs = locs // p * p
-            locs = np.where(visibility > self._blind_zone, locs, locs + p)
-
-        return locs
-
-    @property
     def v(self):
-        return self.data[0]
-
-    @v.setter
-    def v(self, v):
-        self.data[0] = v
+        return self.__vaggrule__(self.data[0])
 
     @property
     def i(self):
-        return self.data[1]
-
-    @i.setter
-    def i(self, i):
-        self.data[1] = i
+        return self.__iaggrule__(self.data[1])
 
     @property
     def s(self):
         return self.v * self.i
 
     @property
-    def values(self):
-        return self.i
-
-    @values.setter
-    def values(self, i: np.ndarray):
-        self.i = i
-
-    def mean_cycle(self):
-        if not self.is_sync():
-            raise ValueError
-
-        if len(self.data.shape) < 3:
-            axes = self.data.shape
-            data = self.data.reshape(*axes[:-1], -1, round(self.fs / self.f0))
-        else:
-            data = self.data
-
-        data = np.mean(data, axis=1)
-
-        return self.update(data=data)
-
-    def sync(self):
-        fitps = FITPS()
-        v, i = fitps(self.v, self.i, fs=self.fs)
-        period = v.shape[1]
-        v, i = v.ravel(), i.ravel()
-        data = np.stack((v, i), axis=0)
-
-        if self.f0 is None:
-            return self.update(data=data,
-                               _sync=True,
-                               _f0=round(self.fs / period),
-                               _period=period)
-
-        return self.update(data=data, _sync=True, _period=period)
-
-    def roll(self, n: int) -> PowerSample:
-        if abs(n) >= len(self):
-            raise ValueError
-
-        if n == 0:
-            return self.copy()
-
-        period = round(self.fs / self.f0)
-        data = roll(self.data, abs(n) // period * period)
-        # lmask = np.zeros(self.timesize, dtype=bool)
-
-        if n < 0:
-            data[1, n:] = 0
-            # lmask[n:] = False
-        else:
-            data[1, :n] = 0
-            # lmask[:n] = False
-
-        # if self.haslocs():
-        locs = np.clip(self.locs + n, a_min=0, a_max=self.timesize)
-        # else:
-        #     locs = None
-
-        return self.update(data=data, _locs=locs)
-
-
-class I(PowerSample):
-    __high__ = True
-
-    def roll(self, n: int) -> PowerSample:
-        if abs(n) >= len(self):
-            raise ValueError
-
-        if n == 0:
-            return self.copy()
-
-        period = round(self.fs / self.f0)
-        data = roll(self.data, n // period * period)
-        # lmask = np.zeros(self.timesize, dtype=bool)
-
-        if n < 0:
-            data[n:] = 0
-            # lmask[n:] = False
-        else:
-            data[:n] = 0
-            # lmask[:n] = False
-
-        # if self.haslocs():
-        locs = np.clip(self.locs + n, a_min=0, a_max=self.timesize)
-        # else:
-        #     locs = None
-
-        return self.update(data=data, _locs=locs)
-
-    def __init__(
-        self,
-        i,
-        fs,
-        f0: float = None,
-        labels: Optional[Union[list[str], dict[str, float]]] = None,
-        components: Optional[np.ndarray] = None,
-        aggregation: Optional[str] = '+',
-        **kwargs: Any,
-    ):
-        super().__init__(data=i,
-                         fs=fs,
-                         fs_type="high",
-                         f0=f0,
-                         labels=labels,
-                         components=components,
-                         aggregation=aggregation,
-                         **kwargs)
-        self._sync = False or len(i.shape) == 2
-        self._period = None
-
-    def __add__(self, sample):
-        return self.agg(sample)
-
-    def __radd__(self, sample):
-        return self.agg(sample)
-
-    def agg(self, sample: I) -> I:
-        i = self.i + sample.i
-        labels = self.labels + sample.labels
-        locs = np.concatenate((self.locs, sample.locs))
-        return self.update(i=i, labels=labels, _locs=locs)
-
-    def is_sync(self):
-        return self._sync
+    def vc(self):
+        return self.data[0]
 
     @property
-    def i(self):
-        return self.data
-
-    @i.setter
-    def i(self, i):
-        self.data = i
+    def ic(self):
+        return self.data[1]
 
     @property
-    def values(self):
-        return self.i
-
-    @values.setter
-    def values(self, i: np.ndarray):
-        self.i = i
-
-
-class P(PowerSample):
-    __low__ = True
-
-    def roll(self, n: int) -> PowerSample:
-        if abs(n) >= self.timesize:
-            raise ValueError
-
-        if n == 0:
-            return self.copy()
-
-        data = roll(self.data, n)
-
-        if n < 0:
-            data[n:] = 0
-        else:
-            data[:n] = 0
-
-        # FIXME if no ROI inside
-        locs = np.clip(self.locs + n, a_min=0, a_max=self.timesize)
-
-        return self.update(data=data, _locs=locs)
-
-    def reg_labels(self):
-        if self.components.count() == 0:
-            raise ValueError
-
-        labels = dict(
-            zip(self.labels, [
-                x.sum() * (l[1] - l[0])
-                for x, l in zip(self.components.values, self.locs)
-            ]))
-
-        return self.update(labels=labels)
-
-    def __init__(
-        self,
-        p,
-        fs,
-        labels: Optional[Union[list[str], dict[str, float]]] = None,
-        components: Optional[np.ndarray] = None,
-        aggregation: Optional[str] = '+',
-        **kwargs: Any,
-    ):
-        super().__init__(data=p,
-                         fs=fs,
-                         fs_type="low",
-                         labels=labels,
-                         components=components,
-                         aggregation=aggregation,
-                         **kwargs)
-
-    def __add__(self, sample):
-        return self.agg(sample)
-
-    def __radd__(self, sample):
-        return self.agg(sample)
-
-    def agg(self, sample: P) -> P:
-        # FIXME assure both clf or both reg
-        p = self.p + sample.p
-
-        if isinstance(self.labels, dict) or isinstance(sample.labels, dict):
-            labels = {**self.labels, **sample.labels}
-        else:
-            labels = self.labels + sample.labels
-
-        locs = np.concatenate((self.locs, sample.locs))
-
-        return self.update(p=p, labels=labels, _locs=locs)
+    def sc(self):
+        return self.vc * self.ic
 
     @property
-    def p(self) -> np.ndarray:
-        return self.data
-
-    @p.setter
-    def p(self, p) -> np.ndarray:
-        self.data = p
+    def vfold(self):
+        return self.vc.reshape(self.n_components, self.n_cycles,
+                               self.cycle_size)
 
     @property
-    def values(self) -> np.ndarray:
-        return self.p
-
-
-class DataSet(Generic):
-    # TODO for each subclass its own implementation
-    __low__ = False
-    __high__ = False
-    # events = Events
-    # TODO if single object called then keep features
-    # features = Features
-
-    # sample = PowerSample
+    def ifold(self):
+        return self.ic.reshape(self.n_components, self.n_cycles,
+                               self.cycle_size)
 
     @property
-    def class_names(self):
-        return self._class_names
+    def sfold(self):
+        return self.sc.reshape(self.n_components, self.n_cycles,
+                               self.cycle_size)
 
     @property
-    def n_classes(self):
-        return len(self.class_names)
+    def appliances(self):
+        if self.is_empty():
+            return None
+
+        if self.has_appliances():
+            # TODO test for drop if locs dropped
+            return self._appliances.copy()
+
+        return [None]
 
     @property
     def labels(self):
-        # TODO as a function, add return type e.g. 2d matrix, 1d list[str]
-        return self._labels
+        return self.appliances
 
     @property
-    def data(self):
-        return self._data
-
-    @data.setter
-    def data(self, data):
-        if isinstance(data, list):
-            self._data = data
-            labels, class_names, n_components = self._get_labels(data)
-            self._labels, self._class_names, self._n_components = labels, class_names, n_components
-        else:
-            raise ValueError
+    def n_appliances(self):
+        return self.n_components
 
     @property
-    def fs(self):
-        return self.data[0].fs
+    def n_types(self):
+        return list(set(self.appliances))
 
     @property
-    def values(self):
-        return self.source("values")
+    def n_orthogonals(self):
+        if self.is_empty():
+            return 0
 
-    def __init__(self, data, random_seed: Optional[int] = None) -> None:
-        # self._check_fs()
+        return self.data.shape[2]
 
-        self._data = data
-        self._labels, self._class_names, self._n_components = self._get_labels(
-            data)
+    @property
+    def n_samples(self):
+        return self.data.shape[3]
 
-        self._rng = np.random.RandomState(random_seed)
+    @property
+    def cycle_size(self):
+        return math.ceil(self.fs / self.f0)
 
-        self.__backref__()
+    @property
+    def n_cycles(self):
+        return self.n_samples // self.cycle_size
 
-    def _get_labels(self, data):
+    @property
+    def dt(self):
+        return self.n_samples / self.fs
 
-        dtypes = set()
-        class_labels = []
-        labels = []
-        n_components = 0
+    @property
+    def dims(self):
+        return self.n_channels, self.n_components, self.n_orthogonals, self.n_samples
 
-        for s in data:
-            # TODO if no labels
-            # TODO if identical labels
-            if isinstance(s.labels, dict):
-                _class_labels = list(s.labels.keys())
-                _labels = list(s.labels.values())
+    @property
+    def datafold(self):
+        return self.data.reshape(*self.dims[:-1], self.n_cycles,
+                                 self.cycle_size)
+
+    @property
+    def components(self):
+        if self.is_empty():
+            return []
+
+        components = []
+
+        for k in range(self.n_components):
+            if self.has_locs():
+                locs = self.locs[k, None]
             else:
-                _class_labels = s.labels
-                _labels = s.labels
+                locs = None
 
-            class_labels.append(_class_labels)
-            labels.append(_labels)
-            dtypes |= {
-                type(v.item()) if hasattr(v, "item") else type(v)
-                for v in _labels
-            }
-            n_components = max(n_components, len(_labels))
+            vi = self.new(self.vc[k],
+                          self.ic[k],
+                          self.fs,
+                          self.f0,
+                          appliances=self.appliances[k],
+                          locs=locs)
+            components.append(vi)
 
-        class_names = sorted(list(set(
-            it.chain(*class_labels))))  # Really stange behavior
-        cn_dtypes = {type(cn) for cn in class_names}
+        return components
 
-        # TODO move labels type check inside sample's class
-        if len(dtypes) != 1:
-            raise TypeError("All class labels must have the same type")
+    @property
+    def orthogonality(self):
+        return self._orthogonality
 
-        if len(cn_dtypes) != 1:
-            raise TypeError("All labels must have the same type")
+    @property
+    def locs(self):
+        if self.is_empty():
+            return None
 
-        cn_dtype = cn_dtypes.pop()
+        if not self.has_locs():
+            return np.asarray([[0, self.n_samples] * self.n_components])
 
-        if cn_dtype is not str:  # TODO any kind of str
-            raise TypeError("Class names must be str")
+        return self._locs.copy()
 
-        mlbin = MultiLabelBinarizer(classes=class_names)
-        dtype = dtypes.pop()
+    @feature
+    def phase_shift(self):
+        # TODO move to `..features`
+        v, i = self.v, self.i
+        zv = np.fft.rfft(v)
+        zi = np.fft.rfft(i)
 
-        if dtype is str:
-            problem_type = "classification"
-        elif dtype is float:
-            problem_type = "regression"
-        elif dtype is int:
-            problem_type = "ranking"
-        else:
+        x = zv * np.conj(zi)
+        a, phi = np.abs(x), np.angle(x)
+        dphi = phi[np.argmax(a)]
+
+        return dphi
+
+    @feature
+    def thd(self, **kwargs):
+        return thd(self.__source__(), self.fs, f0=self.f0, **kwargs)
+
+    @feature
+    def power_factor(self, **kwargs):
+        # TODO move to `..features`
+        pf = np.cos(self.phase_shift()) / np.sqrt(1 + self.thd(**kwargs)**2)
+        return pf
+
+    @feature
+    def spec(self, **kwargs):
+        return spectrum(self.__source__(), self.fs, f0=self.f0, **kwargs)
+
+    @feature
+    def vspec(self, **kwargs):
+        return spectrum(self.v, self.fs, f0=self.f0, **kwargs)
+
+    @feature
+    def ispec(self, **kwargs):
+        return spectrum(self.i, self.fs, f0=self.f0, **kwargs)
+
+    @feature
+    def spectral_centroid(self):
+        return spectral_centroid(self.__source__())
+
+    @feature
+    def temporal_centroid(self):
+        return temporal_centroid(self.__source__())
+
+    def trajectory(self, n_bins=50):
+        '''
+        ref: github.com/sambaiga/MLCFCD
+        '''
+        j = 0
+        V = self.v
+        I = self.i
+        V = V / abs(V).max()
+        I = I / abs(I).max()
+        x_bins = np.linspace(-1, 1, num=n_bins + 1)
+        y_bins = np.linspace(-1, 1, num=n_bins + 1)
+        T = np.zeros((n_bins, n_bins))
+
+        for x1, x2 in zip(x_bins[:-1], x_bins[1:]):
+            i = n_bins - 1
+
+            for y1, y2 in zip(y_bins[:-1], y_bins[1:]):
+                T[i, j] = sum((x1 <= self.i) & (self.i < x2) & (y1 <= self.v)
+                              & (self.v < y2))
+                i -= 1
+
+            j += 1
+
+        T = T / T.max()
+
+        return T
+
+    def copy(self):
+        return deepcopy(self)
+
+    def aggregate(self):
+        return self.new(self.v, self.i, self.fs, self.f0)
+
+    def __init__(
+        self,
+        v,
+        i,
+        fs,
+        f0,
+        appliances=None,
+        locs=None,
+        **kwargs,
+    ) -> None:
+        assert v.shape == i.shape
+
+        T = math.ceil(fs / f0)
+        with_components = len(v.shape) == 2
+        with_orthogonals = len(v.shape) == 3
+
+        if not with_components and not with_orthogonals:
+            v, i = v[None, None], i[None, None]
+
+        self._check_voltage(v, T)
+
+        data = np.stack((v, i))
+        self._f0 = f0
+        self._T = T
+        self._orthogonality = kwargs.get('orthogonality', None)
+
+        super().__init__(data, fs, appliances=appliances, locs=locs)
+
+    @staticmethod
+    def _check_voltage(v, T):
+        # Voltage should be synchronous and starting with positive semi-cycle
+        if v.shape[-1] // T == 0 and v.shape[-1] > 0:
             raise ValueError
 
-        n_classes = len(class_names)
-        y = np.zeros((len(data), n_classes),
-                     dtype=float if problem_type == "regression" else int)
-        mask = mlbin.fit_transform(class_labels) > 0
+        # TODO reverse case support
+        if v.shape[-1] >= T // 2:
+            vhalf = v[..., :T // 2]
+            # ihalf = i[..., :T // 2]
 
-        if problem_type == "classification":
-            y[mask] = 1
-        else:
-            idxs = np.argwhere(mask)
-            rows, cols = idxs[:, 0], idxs[:, 1]
+            if np.mean(vhalf) < 0:
+                raise ValueError
 
-            for i in np.unique(rows):
-                cols_i = cols[rows == i]
-
-                for k, j in enumerate(cols_i):
-                    y[i, j] = labels[i][k]
-
-        return y, class_names, n_components
+    def __len__(self):
+        return self.n_samples
 
     def __getitem__(self, indexer):
-        # TODO everywhere: if len == 1 then just item
-        # TODO boolean mask
-        if abby.is_bearable(indexer, Iterable):
-            assert len(indexer) > 0
-            dtype = type(indexer[0])
+        if not isinstance(indexer, slice):
+            raise ValueError
 
-            if isinstance(indexer, np.ndarray):
-                assert len(indexer.shape) == 1
+        if indexer.step is not None:
+            raise ValueError
 
-            if dtype == str:
-                if not self.is_standalone():
-                    raise ValueError
+        locs = None
+        a0 = indexer.start if indexer.start is not None else 0
+        a = a0 // self.cycle_size * self.cycle_size
+        b0 = indexer.stop if indexer.stop is not None else self.n_samples
+        b = math.ceil(b0 / self.cycle_size) * self.cycle_size
 
-                data = [x for x in self.data if x.label in indexer]
+        if b0 <= a0:
+            raise ValueError
+
+        if a > self.n_samples or b > self.n_samples:
+            raise ValueError
+
+        if b - a < self.cycle_size:
+            raise NotImplementedError
+
+        data = self.data[..., a:b].copy()
+
+        if a0 % self.cycle_size > 0:
+            data[1, ..., :a0 % self.cycle_size] = 0
+
+        if b0 % self.cycle_size > 0:
+            data[1, ..., data.shape[-1] -
+                 (self.cycle_size - b0 % self.cycle_size):] = 0
+
+        assert not np.may_share_memory(data, self.data)
+
+        v, i = data
+        appliances = self.appliances
+
+        if self.has_locs():
+            xa, xb = self.locs.T
+
+            drop = np.argwhere((a0 >= xb) | (b0 <= xa)).ravel()
+
+            xa = np.maximum(xa - a0, 0)
+            xb = np.minimum(xa + b0 - a0, xb - a0)
+            locs = np.stack((xa, xb)).T
+            locs = np.clip(locs, a_min=0, a_max=data.shape[-1])
+
+            v, i, appliances, locs = self._drop_components(
+                drop, v, i, appliances, locs)
+
+        if v is None or i is None:
+            return self.empty()
+
+        return self.new(v,
+                        i,
+                        self.fs,
+                        self.f0,
+                        appliances=appliances,
+                        locs=locs)
+
+    @staticmethod
+    def _drop_components(ids, *data):
+        data__ = []
+
+        for data_ in data:
+            if isinstance(data_, np.ndarray):
+                data_ = np.delete(data_, ids, axis=0)
+            elif isinstance(data_, list):
+                data_ = data_.copy()
+
+                for j in sorted(ids, reverse=True):
+                    del data_[j]
             else:
-                data = [self.data[i] for i in indexer]
-        elif isinstance(indexer, str):
-            data = [x for x in self.data if x.label == indexer]
-        elif isinstance(indexer, int | slice):
-            # FIXME any int-like object
-            data = self.data[indexer]
+                raise NotImplementedError
+
+            data__.append(data_ if len(data_) > 0 else None)
+
+        data__ = tuple(data__)
+
+        if len(data__) > 1:
+            return data__
+
+        return data__[0]
+
+    def drop(self, ids):
+        if not hasattr(ids, '__len__'):
+            ids = [ids]
+
+        v, i, appliances = self._drop_components(ids, *self.data,
+                                                 self.appliances)
+
+        if v is None:
+            return self.empty()
+
+        if self.has_locs():
+            locs = self._drop_components(ids, self.locs)
+        else:
+            locs = None
+
+        return self.new(v,
+                        i,
+                        self.fs,
+                        self.f0,
+                        appliances=appliances,
+                        locs=locs)
+
+    def __add__(self, vi):
+        return self.add(vi)
+
+    def __radd__(self, vi):
+        return self.add(vi)
+
+    def add(self, vi):
+        if self.is_empty() and vi.is_empty():
+            return self.empty()
+
+        # FIXME
+        if isinstance(vi, int) and vi == 0:
+            return self
+
+        if self.n_orthogonals != vi.n_orthogonals:
+            raise OrthogonalsMismatch
+
+        if self.n_samples != vi.n_samples:
+            raise NSamplesMismatch
+
+        if self.fs != vi.fs:
+            raise SamplingRateMismatch
+
+        if self.f0 != vi.f0:
+            raise MainsFrequencyMismatch
+
+        data1 = np.zeros_like(vi.data) if self.is_empty() else self.data
+        data2 = np.zeros_like(self.data) if vi.is_empty() else vi.data
+        v, i = np.concatenate((data1, data2), axis=1)
+        appliances = self.appliances + vi.appliances
+
+        assert len(v) == len(i) == len(appliances)
+
+        if self._require_components and vi._require_components:
+            locs = np.concatenate((self.locs, vi.locs))
+            assert len(appliances) == len(locs)
+        else:
+            v = self.__vaggrule__(v, keepdims=True)
+            i = self.__iaggrule__(i, keepdims=True)
+            locs = None
+
+        return self.new(v,
+                        i,
+                        self.fs,
+                        self.f0,
+                        appliances=appliances,
+                        locs=locs)
+
+    def has_appliances(self):
+        return self._appliances is not None
+
+    def has_locs(self):
+        return self._locs is not None
+
+    def resample(self, fs, **kwargs):
+        # TODO critical sampling rate condition
+        if self.is_empty():
+            return self.empty()
+
+        if fs == self.fs:
+            return self.copy()
+
+        locs = None
+        Tn = math.ceil(fs / self.fs * self.cycle_size)
+
+        if fs > self.fs:
+            v, i = upsample(self.datafold, Tn, **kwargs)
+        else:
+            v, i = downsample(self.datafold, Tn)
+
+        dims = self.n_components, self.n_orthogonals, -1
+        v, i = v.reshape(*dims), i.reshape(*dims)
+        assert v.shape[-1] % Tn == 0
+
+        if self.has_locs():
+            locs = self.locs * fs / self.fs
+            locs[:, 0], locs[:, 1] = np.floor(locs[:, 0]), np.ceil(locs[:, 1])
+            locs = locs.astype(int)
+            locs = np.clip(locs, a_min=0, a_max=v.shape[-1])
+
+        return self.new(v,
+                        i,
+                        fs,
+                        self.f0,
+                        appliances=self.appliances,
+                        locs=locs)
+
+    def roll(self, n):
+        '''
+        cycle-wise roll 
+        '''
+        if self.is_empty() or n > self.n_samples:
+            return self.empty()
+        elif n == 0:
+            return self.new(self.vc,
+                            self.ic,
+                            self.fs,
+                            self.f0,
+                            appliances=self.appliances,
+                            locs=self.locs if self.has_locs() else None)
+
+        n_cycles = n // self.cycle_size * self.cycle_size
+        v, i = np.roll(self.data, n_cycles, axis=-1)
+
+        mute = np.s_[n:] if n < 0 else np.s_[:n]
+        mute = np.s_[..., mute]
+        i[mute] = 0
+
+        appliances = self.appliances
+        locs = np.clip(self.locs + n, a_min=0, a_max=self.n_samples)
+
+        drop = np.argwhere(locs[:, 0] > self.n_samples).ravel()
+        v, i, appliances, locs = self._drop_components(drop, v, i, appliances,
+                                                       locs)
+
+        return self.new(v,
+                        i,
+                        self.fs,
+                        self.f0,
+                        appliances=appliances,
+                        locs=locs)
+
+    def _adjust_by_cycle_size(self, n):
+        dn = self.cycle_size - n % self.cycle_size
+        n += dn if n % self.cycle_size > 0 else 0
+
+        return n
+
+    def _adjust_delta(self, n):
+        if isinstance(n, tuple):
+            a, b = n
+        else:
+            a, b = n - n // 2, n // 2
+
+        if a != 0:
+            a = self._adjust_by_cycle_size(a)
+
+        if b != 0:
+            b = self._adjust_by_cycle_size(b)
+
+        return a, b
+
+    def extrapolate(self, n):
+        V, I = [], []
+        n = self._adjust_delta(n)
+
+        if self.is_empty():
+            return self.empty()
+
+        locs = self.locs if self.has_locs() else None
+        dims = self.n_components, self.n_orthogonals, -1
+
+        for k, (vo, io) in enumerate(zip(*self.data)):
+            for v, i in zip(vo, io):
+                v = extrapolate(v, n, fs=self.fs, f0=self.f0)
+
+                try:
+                    i = extrapolate(i, n, fs=self.fs, f0=self.f0)
+
+                except MissingDataError:
+                    i = pad(i, n)
+
+                    if self.has_locs():
+                        locs[k] += n[0]
+                else:
+                    if self.has_locs():
+                        locs[k] += n[0]
+                        locs[k][1] += n[1]
+
+                V.append(v), I.append(i)
+
+        v, i = np.stack(V), np.stack(I)
+        v, i = v.reshape(*dims), i.reshape(*dims)
+
+        if self.has_locs():
+            locs = np.clip(locs, a_min=0, a_max=v.shape[-1])
+
+        return self.new(v,
+                        i,
+                        self.fs,
+                        self.f0,
+                        appliances=self.appliances,
+                        locs=locs)
+
+    def pad(self, n):
+        locs = None
+        V, I = [], []
+        n = self._adjust_delta(n)
+
+        if self.is_empty():
+            return self.empty()
+
+        dims = self.n_components, self.n_orthogonals, -1
+
+        for vo, io in zip(*self.data):
+            for v, i in zip(vo, io):
+                v = extrapolate(v, n, fs=self.fs, f0=self.f0)
+                i = pad(i, n)
+                V.append(v), I.append(i)
+
+        v, i = np.stack(V), np.stack(I)
+        v, i = v.reshape(*dims), i.reshape(*dims)
+
+        if self.has_locs():
+            locs = self.locs + n[0]
+            locs = np.clip(locs, a_min=0, a_max=v.shape[-1])
+
+        return self.new(v,
+                        i,
+                        self.fs,
+                        self.f0,
+                        appliances=self.appliances,
+                        locs=locs)
+
+    def cycle(self, mode='mean'):
+        if self.is_empty():
+            return self.empty()
+
+        if mode == 'mean':
+            v, i = np.mean(self.datafold, axis=-2)
+        elif mode == 'median':
+            v, i = np.median(self.datafold, axis=-2)
         else:
             raise ValueError
 
-        if isinstance(data, Iterable):
-            return self.update(_data=data)
+        locs = None
+
+        if self.has_locs():
+            locs = np.zeros((self.n_components, 2), dtype=int)
+            locs[:, 1] = v.shape[-1]
+
+        return self.new(v,
+                        i,
+                        self.fs,
+                        self.f0,
+                        appliances=self.appliances,
+                        locs=locs)
+
+    def unitscale(self):
+        if self.is_empty():
+            return self.empty()
+
+        v = self.vc / abs(self.v).max()
+        i = self.ic / abs(self.i).max()
+        locs = self.locs if self.has_locs() else None
+
+        return self.new(v,
+                        i,
+                        self.fs,
+                        self.f0,
+                        appliances=self.appliances,
+                        locs=locs)
+
+    def fryze(self):
+        orthogonality = 'Fryze'
+        v, i = self.data
+
+        if self.is_empty():
+            return self.empty()
+
+        if self.n_orthogonals > 1:
+            v, i = v[:, 0, None], i.sum(1, keepdims=True)
+
+        i_a, i_r = fryze(v, i)
+        i = np.concatenate((i_a, i_r), axis=1)
+        v = np.repeat(v, 2, axis=1)
+        locs = self.locs if self.has_locs() else None
+
+        return self.new(v,
+                        i,
+                        self.fs,
+                        self.f0,
+                        appliances=self.appliances,
+                        locs=locs,
+                        orthogonality=orthogonality)
+
+    def budeanu(self):
+        orthogonality = 'Budeanu'
+        v, i = self.data
+
+        if self.is_empty():
+            return self.empty()
+
+        if self.n_orthogonals > 1:
+            v, i = v[:, 0, None], i.sum(1, keepdims=True)
+
+        i_a, i_q, i_d = budeanu(v, i)
+        i = np.concatenate((i_a, i_q, i_d), axis=1)
+        v = np.repeat(v, 3, axis=1)
+
+        locs = self.locs if self.has_locs() else None
+
+        return self.new(v,
+                        i,
+                        self.fs,
+                        self.f0,
+                        appliances=self.appliances,
+                        locs=locs,
+                        orthogonality=orthogonality)
+
+    def features(self, features=None, format='list', **kwargs):
+        if features is None:
+            features = self.feature_names
+        else:
+            ufeatures = set(features)
+
+            if len(ufeatures) != features:
+                raise ValueError
+
+        data = []
+        f_kwargs = nested_dict()
+        f_reps = {}
+
+        for k, v in kwargs.items():
+            ks = k.split('__')
+            if len(ks) > 1 & len(ks[0]) > 0:
+                f_kwargs[ks[0]].update({''.join(ks[1:]): v})
+
+        for feature in features:
+            if isinstance(feature, str):
+                try:
+                    feature_fn = getattr(self, feature)
+                except AttributeError:
+                    raise ValueError
+
+                if not getattr(feature_fn, 'is_feature', False):
+                    raise ValueError
+            elif hasattr(feature, '__class__'):
+                feature_fn = feature
+                feature = feature_fn.__class__.__name__
+            elif isfunction(feature):
+                feature_fn = feature
+                feature = feature_fn.__name__
+            else:
+                raise ValueError
+
+            # TODO named output variables
+            values = feature_fn(**f_kwargs[feature])
+
+            if not isinstance(values, tuple):
+                values = (values, )
+
+            k = 0
+            just_scalar = True
+
+            for v in values:
+                if isinstance(v, Number):
+                    k += 1
+                    data.append(v)
+                elif hasattr(v, '__len__'):
+                    just_scalar = False
+                    k += len(v)
+                    data.extend(v)
+                else:
+                    raise ValueError
+
+            k = 0 if k == 1 and len(values) == 1 and just_scalar else k
+            f_reps.update({feature: k})
+
+        keys = lambda: list(
+            it.chain(*[[
+                f'{k}_{i}' if n > 0 else f'{k}'
+                for i in range(1, n + 1 if n > 0 else 2)
+            ] for k, n in f_reps.items()]))
+
+        if format == 'numpy':
+            data = np.asarray(data)
+        elif format == 'pandas':
+            data = pd.DataFrame([data], columns=keys())
+        elif format == 'dict':
+            data = dict(zip(keys(), data))
+        elif format != 'list':
+            raise ValueError
 
         return data
 
-    def get(
-        self,
-        class_name: Optional[str] = None,
-        class_name__in: Optional[list[str]] = None,
-    ) -> DataSet:
-        if class_name is not None:
-            # FIXME upd class names also
-            return self[class_name]
+    def hash(self):
+        return hash(self.data.tobytes()) & 0xFFFFFFFFFFFFFFFF
 
-        if class_name__in is not None:
-            return self[class_name__in]
+    def todict(self):
+        comps = [(*self.ic[i], ) for i in range(self.n_components)]
 
-    def __len__(self):
-        return len(self.data)
+        return {
+            'v': self.v,
+            'i': self.i,
+            'fs': self.fs,
+            'f0': self.f0,
+            'components': comps,
+            'locs': self.locs,
+        }
 
-    def combine(self, class_names: list[str], class_name: str = None):
-        assert len(class_names) > 0
-        class_names = list(map(str, class_names))
+    @staticmethod
+    def _sine_waveform(amp, f0, fs, phase=0, dt=None, n=None):
+        dt = 1 / f0 if dt is None else dt
+        n = math.ceil(fs * dt) if n is None else n
+        x = np.linspace(0, dt, n)
+        y = amp * np.sin(2 * np.pi * f0 * x + phase)
 
-        if class_name is None:
-            class_name = class_names[0]
+        return y
 
-        # data = self.get(class_name__in=class_names).data
-        # TODO improve
-        data = list(
-            map(
-                lambda x: x.update(_labels=[class_name])
-                if x.label in class_names else x, self.data))
+    @classmethod
+    def active_load(cls, v_amp, i_amp, fs, f0, dt=None, n=None):
+        v = cls._sine_waveform(v_amp, f0, fs, dt=dt, n=n)
+        i = cls._sine_waveform(i_amp, f0, fs, dt=dt, n=n)
 
-        return self.update(data=data)
+        # TODO check dims are needed for all synced
+        return cls(v, i, fs=fs, is_synced=False)
 
-    def create(self, *args: Any, **kwargs: Any) -> PowerSample:
-        sample_cls = self.data[0].__class__
-        sample = sample_cls(*args, **kwargs)
-        return sample
+    @classmethod
+    def reactive_load(
+        cls,
+        v_amp,
+        i_amp,
+        fs,
+        f0,
+        power_factor=1.0,
+        dt=None,
+        n=None,
+    ):
+        assert power_factor >= 0 and power_factor <= 1
 
-    def count(self):
+        phase = np.arccos(power_factor)
+        v = cls._sine_waveform(v_amp, f0, fs, dt=dt, n=n)
+        i = cls._sine_waveform(i_amp, f0, fs, phase=phase, dt=dt, n=n)
+
+        return cls(v, i, fs=fs, is_synced=False)
+
+    def empty(self):
+        return VIEmpty(self.fs, self.f0)
+
+
+class VIEmpty(VI):
+    '''
+    A lazy and empty signal
+    '''
+
+    def __init__(self, fs, f0) -> None:
+        v, i = np.zeros((2, 0, 0, 0))
+        super().__init__(v, i, fs, f0)
+        self._is_empty = True
+
+
+class P(L):
+    __recording_type__ = 'low_sampling_rate'
+
+    def __init__(self, p, fs) -> None:
+        super().__init__(p, fs)
+
+    def resample(self, fs):
+        raise NotImplementedError
+
+
+class DataSet:
+    pass
+
+
+class VISet(DataSet, BackupMixin):
+
+    @property
+    def n_appliances(self):
+        return len(self.appliances)
+
+    @property
+    def n_signatures(self):
         return len(self)
 
-    def random(self):
-        # FIXME if called together with .get() multiple time then it is not random
-        # FIXME if self[n, :] then it doesn't work
-        idx = self._rng.randint(0, self.count())
-        return self[idx]
+    @property
+    def n_samples(self):
+        return self._n_samples
 
-    # def apply(self, fs):
-    #     data = []
+    @property
+    def size(self):
+        return self.n_signatures, self.n_samples
 
-    #     for sample in self.data:
-    #         data.append(sample.apply(fs))
+    @property
+    def data(self):
+        data = np.stack([vi.data for vi in self.signatures])
 
-    #     return self.update(data=data)
+        return data
 
-    def is_aligned(self, source_name: Optional[str] = None):
-        if source_name is None:
-            source_name = "values"
+    @property
+    def values(self):
+        return self.s
 
-        lens = [len(s.source(source_name)) for s in self.data]
-        lens = np.asarray(lens)
+    @property
+    def labels(self):
+        labels = [vi.labels for vi in self.signatures]
 
-        return all(lens[0] == lens[1:])
+        return labels
 
-    def source(self, source_name: str):
-        values = [s.source(source_name) for s in self.data]
+    @property
+    def appliance_types(self):
+        return list(set(list(it.chain(*self.labels))))
 
-        if self.is_aligned(source_name=source_name):
-            values = np.asarray(values)
+    @property
+    def targets(self):
+        mlb = MultiLabelBinarizer()
 
-        return values
+        return mlb.fit_transform(self.labels)
 
-    def is_standalone(self):
-        return np.all(self.labels.sum(1) == 1)
+    @property
+    def fs(self):
+        return self._fs
 
-    def train_test_split(self, test_size: float = 0.3):
-        if self.is_standalone():
-            stratify = np.nonzero(self.labels > 0)[1]
+    @property
+    def f0(self):
+        return self._f0
+
+    @classmethod
+    def new(cls, *args, **kwargs):
+        return cls(*args, **kwargs)
+
+    @classmethod
+    def from_array(
+        cls,
+        v: np.ndarray,
+        i: np.ndarray,
+        fs,
+        f0,
+        y=None,
+        locs=None,
+        safe_mode=True,
+    ):
+        assert v.shape == i.shape
+        assert len(v.shape) == len(i.shape) == 2
+
+        if y is None:
+            y = [None] * len(v)
         else:
-            stratify = self.labels.sum(1)
+            assert len(y) == len(v)
+            assert len(y.shape) == 1 or (len(y.shape) == 2
+                                         and np.product(y.shape) == len(v))
 
-        train, test = train_test_split(range(self.count()),
-                                       test_size=test_size,
-                                       stratify=stratify)
-        # Two lines below extremely slow
-        X_train = [self.data[i] for i in train]
-        X_test = [self.data[i] for i in test]
-        Y_train = self._labels[train]
-        Y_test = self._labels[test]
+        if locs is None:
+            locs = [None] * len(v)
 
-        # TODO to .new but deal with inconsistent labels
-        train = self.update(data=X_train, _labels=Y_train)
-        test = self.update(data=X_test, _labels=Y_test)
+        data = []
 
-        return train, test
+        for vj, ij, yj, locsj in zip(v, i, y, locs):
+            vi = VI(vj, ij, fs, f0, y=yj, locs=locsj)
+            data.append(vi)
 
-    def align(
+        return cls(data, safe_mode=safe_mode)
+
+    def __init__(
         self,
-        n: int = None,
-        if_less: str = "pad",
-    ) -> DataSet:
-        # TODO overlapped cropping
-        if if_less not in ["pad", "extrapolate", "drop"]:
+        signatures: list[VI],
+        n_cycles='median',
+        safe_mode=True,
+    ):
+        n_samples = [vi.n_samples for vi in signatures]
+        fs = [vi.fs for vi in signatures]
+        f0 = [vi.f0 for vi in signatures]
+
+        if not all([fs[0] == f for f in fs[1:]]):
             raise ValueError
 
-        if n is None:
-            ls = [len(s) for s in self.data]
-            ls, cs = np.unique(ls, return_counts=True)
-            n = ls[np.argmax(cs)]
+        if not all([f0[0] == f for f in f0[1:]]):
+            raise ValueError
 
-        samples = []
+        if n_cycles == 'median':
+            n_samples = np.median(n_samples)
+        elif n_cycles == 'mean':
+            n_samples = np.mean(n_samples)
+        else:
+            raise ValueError
 
-        for sample in tqdm(self.data):
-            if n > len(sample):
-                raise ValueError(
-                    "Argument `n` cannot be more than the length of a sample")
+        self._hashes = set()
+        new_signatures = []
+        n_samples = int(math.ceil(n_samples))
 
-            for i in range(0, len(sample), n):
-                subsample = sample[i:i + n]
-                dn = n - len(subsample)
+        while len(signatures) > 0:
+            vi = signatures.pop(0)
+            dn = n_samples - len(vi)
 
-                if dn > 0 and if_less == "pad":
-                    subsample = subsample.pad((0, dn))
-                elif dn > 0 and if_less == "extrapolate":
-                    subsample = subsample.extrapolate((0, dn))
-                elif dn > 0 and if_less == "drop":
-                    break
+            if dn > 0:
+                vi = vi.extrapolate((0, dn))
+            elif dn < 0:
+                vi = vi[:n_samples]
 
-                samples.append(subsample)
+            if safe_mode:
+                self._hashes.add(vi.hash())
+
+            new_signatures.append(vi)
+
+        self.signatures = new_signatures
+        self._n_samples = n_samples
+        self._fs = fs[0]
+        self._f0 = f0[0]
+        self._safe_mode = safe_mode
+
+    def __len__(self):
+        return len(self.signatures)
+
+    def __getitem__(self, indexer):
+        just_signature = False
+
+        if isinstance(indexer, slice):
+            a = 0 if indexer.start is None else indexer.start
+            b = len(self) if indexer.stop is None else indexer.stop
+            indexer = list(range(a, b))
+        elif isinstance(indexer, int):
+            indexer = [indexer]
+            just_signature = True
+        else:
+            raise ValueError
+
+        indexer = np.asarray(indexer)
+        assert len(indexer.shape) == 1
+
+        if indexer.dtype == bool:
+            assert len(indexer) == len(self)
+            indexer = np.argwhere(indexer).ravel()
+
+        # TODO check for data mutability
+        signatures = [self.signatures[i] for i in indexer]
+
+        if len(signatures) == 0:
+            # TODO return empty set
+            return None
+
+        if just_signature:
+            return signatures[0]
+
+        return self.new(signatures)
+
+    def is_multilabel(self):
+        return (self.targets.sum(1) > 1).any()
+
+    def appliances(self, names, exact_match=False):
+        if not hasattr(names, '__len__'):
+            names = [names]
+
+        mlb = MultiLabelBinarizer()
+        mlb.fit(self.labels)
+        query = mlb.transform([names])
+
+        if exact_match:
+            mask = (self.targets == query).all(1)
+        else:
+            mask = (self.targets * query).sum(1) == len(names)
+
+        ids = np.argwhere(mask).ravel()
+
+        if len(ids) == 0:
+            return None
+
+        signatures = [self.signatures[i] for i in ids]
+
+        return self.new(signatures)
+
+    @safe_mode
+    def features(self, features=None, format='list', **kwargs):
+        X = []
+
+        for vi in self.signatures:
+            x = vi.features(features=features, format=format, **kwargs)
+            X.append(x)
+
+        if format == 'numpy':
+            X = np.stack(X)
+        elif format == 'pandas':
+            X = pd.concat(X, axis=0, ignore_index=True)
+        elif format == 'dict':
+            X_dict = defaultdict(list)
+
+            while len(X) > 0:
+                x = X.pop(0)
+
+                for k, v in x.items():
+                    X_dict[k].append(v)
+
+            X_dict = dict(X_dict)
+            X = X_dict
+        elif format != 'list':
+            raise ValueError
+
+        return X
+
+    def stats(self, features=None, decimals=4, **kwargs):
+        X = self.features(features=features, format='pandas', **kwargs)
+
+        return X.describe().iloc[1:].round(decimals)
+
+    def split(self, test_size=0.3, by_samples=True, random_state=None):
+        if self.targets is not None:
+            stratify = self.targets.sum(1)
+        else:
+            stratify = None
+
+        if by_samples:
+            train_idxs, test_idxs = train_test_split(range(len(self)),
+                                                     test_size=test_size,
+                                                     stratify=stratify,
+                                                     random_state=random_state)
+            train_samples = [self.signatures[i] for i in train_idxs]
+            test_samples = [self.signatures[i] for i in test_idxs]
+            train_set = self.new(train_samples)
+            test_set = self.new(test_samples)
+        else:
+            # TODO by appliance type
+            pass
+
+        return train_set, test_set
+
+    def shuffle(self, random_state=None):
+        rng = np.random.RandomState(random_state)
+        ordr = rng.choice(len(self), len(self), replace=False)
+        samples = [self.signatures[i] for i in ordr]
 
         return self.new(samples)
 
-    @property
-    def classes(self):
-        for class_name in self.class_names:
-            subset = self.get(class_name=class_name)
-            yield subset
+    def random(self, random_state=None):
+        rng = np.random.RandomState(random_state)
+        idx = rng.randint(len(self))
 
+        return self.signatures[idx]
 
-class HIDataSet(DataSet):
-    __high__ = True
+    def to(self):
+        raise NotImplementedError
 
-    def sync(self):
-        data = []
-
-        for sample in tqdm(self.data):
-            if hasattr(sample, "sync"):
-                data.append(sample.sync())
-            else:
-                raise AttributeError
-
-        return self.new(data)
+    def hash(self):
+        return hash(self.data.tobytes()) & 0xFFFFFFFFFFFFFFFF

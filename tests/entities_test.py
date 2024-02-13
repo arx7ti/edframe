@@ -5,7 +5,7 @@ import itertools as it
 import unittest as test
 from functools import reduce
 
-from edframe.data.entities2 import VI, VISet
+from edframe.data.entities import VI, VISet
 from edframe.data.generators import make_hf_cycles, make_oscillations
 from edframe.utils.exceptions import NotEnoughCycles, SingleCycleOnly, NSamplesMismatch, SamplingRateMismatch, MainsFrequencyMismatch
 
