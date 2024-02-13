@@ -378,18 +378,7 @@ class VI(Recording, BackupMixin):
         if not with_components and not with_orthogonals:
             v, i = v[None, None], i[None, None]
 
-        # + VOLTAGE CHECK
-        # Voltage should be synchronous and starting with positive semi-cycle
-        if v.shape[-1] // T == 0 and v.shape[-1] > 0:
-            raise ValueError
-
-        # TODO reverse case support
-        vhalf = v[..., :T // 2]
-        # ihalf = i[..., :T // 2]
-
-        if np.mean(vhalf) < 0:
-            raise ValueError
-        # - VOLTAGE CHECK
+        self._check_voltage(v, T)
 
         data = np.stack((v, i))
         self._f0 = f0
@@ -397,6 +386,20 @@ class VI(Recording, BackupMixin):
         self._orthogonality = kwargs.get('orthogonality', None)
 
         super().__init__(data, fs, appliances=appliances, locs=locs)
+
+    @staticmethod
+    def _check_voltage(v, T):
+        # Voltage should be synchronous and starting with positive semi-cycle
+        if v.shape[-1] // T == 0 and v.shape[-1] > 0:
+            raise ValueError
+
+        # TODO reverse case support
+        if v.shape[-1] >= T // 2:
+            vhalf = v[..., :T // 2]
+            # ihalf = i[..., :T // 2]
+
+            if np.mean(vhalf) < 0:
+                raise ValueError
 
     def __len__(self):
         return self.n_samples
