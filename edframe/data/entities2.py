@@ -19,7 +19,7 @@ from datetime import datetime
 from pickle import HIGHEST_PROTOCOL
 from .decorators import feature, safe_mode, check_empty
 from ..features import fundamental, spectrum, thd, spectral_centroid, temporal_centroid, rms
-from ..utils.exceptions import NotEnoughCycles, SingleCycleOnly, NSamplesMismatch, SamplingRateMismatch, MainsFrequencyMismatch
+from ..utils.exceptions import NotEnoughCycles, SingleCycleOnly, OrthogonalsMismatch,NSamplesMismatch, SamplingRateMismatch, MainsFrequencyMismatch
 from ..signals import FITPS, downsample, upsample, fryze, budeanu, extrapolate, pad
 from ..utils.common import nested_dict
 
@@ -514,9 +514,11 @@ class VI(Recording, BackupMixin):
 
     def add(self, vi):
         # FIXME
-        # TODO if n_orthogonals > 1
         if isinstance(vi, int) and vi == 0:
             return self
+
+        if self.n_orthogonals != vi.n_orthogonals:
+            raise OrthogonalsMismatch 
 
         if self.n_samples != vi.n_samples:
             raise NSamplesMismatch

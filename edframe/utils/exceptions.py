@@ -6,6 +6,10 @@ class SingleCycleOnly(Exception):
     pass
 
 
+class OrthogonalsMismatch(Exception):
+    pass
+
+
 class NSamplesMismatch(Exception):
     pass
 
