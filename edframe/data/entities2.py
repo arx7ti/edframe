@@ -63,18 +63,18 @@ class Recording:
         return cls(*args, **kwargs)
 
     def __init__(self, data, fs, appliances=None, locs=None) -> None:
+        if isinstance(appliances, str | int):
+            appliances = [appliances]
+
         has_apps = appliances is not None and hasattr(appliances, '__len__')
         has_locs = locs is not None and hasattr(locs, '__len__')
 
         if has_locs:
-            assert None not in locs
             locs = np.asarray(locs)
+            assert len(locs.shape) == 2
 
         if has_apps and has_locs:
             assert len(locs) == len(appliances)
-
-        if isinstance(appliances, str | int):
-            appliances = [appliances] * data.shape[1]
 
         # User-defined data
         self._data = data
@@ -196,15 +196,13 @@ class VI(Recording, BackupMixin):
     def labels(self):
         return self.appliances
 
-    # @property
-    # def n_appliances(self):
-    #     if self.is_empty():
-    #         return 0
+    @property
+    def n_appliances(self):
+        return self.n_components
 
-    #     if self.has_appliances():
-    #         return len(self.appliances)
-
-    #     return 1
+    @property
+    def n_types(self):
+        return list(set(self.appliances))
 
     @property
     def n_orthogonals(self):
@@ -240,15 +238,26 @@ class VI(Recording, BackupMixin):
 
     @property
     def components(self):
-        raise NotImplementedError
-        # return [
-        #     self.new(self.vc[i],
-        #              self.ic[i],
-        #              self.fs,
-        #              self.f0,
-        #              appliances=self.appliances[i],
-        #              locs=self.locs[i]) for i in range(self.n_components)
-        # ]
+        if self.is_empty():
+            return []
+
+        components = []
+
+        for k in range(self.n_components):
+            if self.has_locs():
+                locs = self.locs[k, None]
+            else:
+                locs = None
+
+            vi = self.new(self.vc[k],
+                          self.ic[k],
+                          self.fs,
+                          self.f0,
+                          appliances=self.appliances[k],
+                          locs=locs)
+            components.append(vi)
+
+        return components
 
     @property
     def orthogonality(self):
@@ -475,6 +484,28 @@ class VI(Recording, BackupMixin):
 
         return data__[0]
 
+    def drop(self, ids):
+        if not hasattr(ids, '__len__'):
+            ids = [ids]
+
+        v, i, appliances = self._drop_components(ids, *self.data,
+                                                 self.appliances)
+
+        if v is None:
+            return VIEmpty(self.fs, self.f0, self.n_samples)
+
+        if self.has_locs():
+            locs = self._drop_components(ids, self.locs)
+        else:
+            locs = None
+
+        return self.new(v,
+                        i,
+                        self.fs,
+                        self.f0,
+                        appliances=appliances,
+                        locs=locs)
+
     def __add__(self, vi):
         return self.add(vi)
 
@@ -595,8 +626,6 @@ class VI(Recording, BackupMixin):
     def _adjust_by_cycle_size(self, n):
         dn = self.cycle_size - n % self.cycle_size
         n += dn if n % self.cycle_size > 0 else 0
-        # n += dn
-        # n += n % self.cycle_size
 
         return n
 
@@ -847,28 +876,6 @@ class VI(Recording, BackupMixin):
             raise ValueError
 
         return data
-
-    def drop(self, ids):
-        if not hasattr(ids, '__len__'):
-            ids = [ids]
-
-        v, i, appliances = self._drop_components(ids, *self.data,
-                                                 self.appliances)
-
-        if v is None:
-            return VIEmpty(self.fs, self.f0, self.n_samples)
-
-        if self.has_locs():
-            locs = self._drop_components(ids, self.locs)
-        else:
-            locs = None
-
-        return self.new(v,
-                        i,
-                        self.fs,
-                        self.f0,
-                        appliances=appliances,
-                        locs=locs)
 
     def hash(self):
         return hash(self.data.tobytes()) & 0xFFFFFFFFFFFFFFFF
