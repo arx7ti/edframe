@@ -143,9 +143,8 @@ class VI(Recording, BackupMixin):
     '''
     __recording_type__ = 'high_sampling_rate'
 
-    # TODO empty signal
-
-    def __source__(self):
+    @property
+    def values(self):
         '''
         Source signal used for features calculation
         '''
@@ -295,6 +294,38 @@ class VI(Recording, BackupMixin):
 
         return self._locs.copy()
 
+    def split_locs(self):
+        # TODO revise concept based on this
+        if self.is_empty():
+            return None
+
+        if not self.has_locs():
+            return self.locs
+
+        locs = self.locs
+        x = np.zeros(self.n_samples)
+
+        for a, b in locs:
+            x[a:b] += 1
+
+        dx = np.diff(x, prepend=0)
+        ids = np.argwhere((dx != 0)).ravel()
+
+        if len(ids) % 2 != 0:
+            ids = np.append(ids, len(x))
+
+        locs = []
+
+        for i in range(len(ids) - 1):
+            a, b = ids[i], ids[i + 1]
+
+            if (x[a:b] != 0).all():
+                locs.append([a, b])
+
+        locs = np.asarray(locs)
+
+        return locs
+
     @feature
     def phase_shift(self):
         # TODO move to `..features`
@@ -310,7 +341,7 @@ class VI(Recording, BackupMixin):
 
     @feature
     def thd(self, **kwargs):
-        return thd(self.__source__(), self.fs, f0=self.f0, **kwargs)
+        return thd(self.values, self.fs, f0=self.f0, **kwargs)
 
     @feature
     def power_factor(self, **kwargs):
@@ -320,7 +351,7 @@ class VI(Recording, BackupMixin):
 
     @feature
     def spec(self, **kwargs):
-        return spectrum(self.__source__(), self.fs, f0=self.f0, **kwargs)
+        return spectrum(self.values, self.fs, f0=self.f0, **kwargs)
 
     @feature
     def vspec(self, **kwargs):
@@ -332,11 +363,11 @@ class VI(Recording, BackupMixin):
 
     @feature
     def spectral_centroid(self):
-        return spectral_centroid(self.__source__())
+        return spectral_centroid(self.values)
 
     @feature
     def temporal_centroid(self):
-        return temporal_centroid(self.__source__())
+        return temporal_centroid(self.values)
 
     def trajectory(self, n_bins=50):
         '''
@@ -1000,10 +1031,6 @@ class VISet(DataSet, BackupMixin):
         data = np.stack([vi.data for vi in self.signatures])
 
         return data
-
-    @property
-    def values(self):
-        return self.s
 
     @property
     def labels(self):
