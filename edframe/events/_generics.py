@@ -3,7 +3,7 @@ from tqdm import tqdm
 # from beartype import abby
 from typing import Optional, Callable, Iterable
 from sklearn.cluster import AgglomerativeClustering
-from edframe.data.entities import PowerSample, DataSet
+# from edframe.data.entities import PowerSample, DataSet
 from scipy.signal import savgol_filter
 
 import numpy as np

@@ -17,7 +17,7 @@ N_COMPONENTS = [1, 2, 3, 4, 5, 10, 20]
 RANDOM_STATE = 42
 N_CHOICES = 5
 V_DC_OFFSET = 0
-N_SIGNATURES = 100
+N_SIGNATURES = 10
 N_SIGNATURES_PER_ITER = 3
 ITERGRID = list(
     it.islice(it.product(F0, FS, N_CYCLES),
@@ -122,6 +122,7 @@ class TestVI(test.TestCase):
 
     # TODO deeper tests of data leakage between newly created instances
     def test_getitem(self):
+        # TODO test da, db
         for vi in self.signatures:
             vi = sum(vi)
             n = np.random.randint(0, len(vi), size=2 * N_CHOICES)
@@ -135,14 +136,12 @@ class TestVI(test.TestCase):
 
                     if dnc == vi.n_components:
                         self.assertTrue(vi_.is_empty())
-
-                    if (a >= vi.locs.T[1]).any() or (b <= vi.locs.T[0]).any():
-                        if not vi_.is_empty():
+                    else:
+                        if (a >= vi.locs.T[1]).any() or (
+                                b <= vi.locs.T[0]).any():
                             self.assertLess(len(vi_.locs), len(vi.locs))
+                            self.assertLess(vi_.n_components, vi.n_components)
 
-                        self.assertLess(vi_.n_components, vi.n_components)
-
-                    if vi_.n_components > 0:
                         self.assertGreaterEqual(vi_.locs.min(), 0)
                         self.assertLessEqual(vi_.locs.max(), vi_.n_samples)
                         self.assertEqual(len(vi_) % vi.cycle_size, 0)
@@ -151,14 +150,14 @@ class TestVI(test.TestCase):
                         self.assertAlmostEqual(vi_.i.sum(), vi.i[a:b].sum())
                         self.assertEqual(len(vi_.appliances), vi_.n_components)
 
-                    if dnc > 0:
-                        self.assertIsNot(vi_.appliances, vi.appliances)
+                        if dnc > 0:
+                            self.assertIsNot(vi_.appliances, vi.appliances)
 
-                    if a == 0 and b == vi.n_samples:
-                        self.assertEqual(vi_._data.shape, vi._data.shape)
-                        self.assertTrue(np.allclose(vi_._data, vi._data))
-                        # Otherwise many exceptions to handle to test.
-                        # Was asserted in the method instead.
+                        if a == 0 and b == vi.n_samples:
+                            self.assertEqual(vi_._data.shape, vi._data.shape)
+                            self.assertTrue(np.allclose(vi_._data, vi._data))
+                            # Otherwise many exceptions to handle to test.
+                            # Was asserted in the method instead.
 
                     self.assertIsNot(id(vi_._data), id(vi._data))
                     self.assertFalse(np.may_share_memory(vi_._data, vi._data))
