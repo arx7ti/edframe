@@ -478,8 +478,7 @@ class VI(Recording, BackupMixin):
             raise NotImplementedError
 
         data = self.data[..., a:b].copy()
-        da = a0 - a
-        db = b - b0
+        da, db = a0 - a, b - b0
 
         if da > 0:
             data[1, ..., :da] = 0
@@ -489,22 +488,16 @@ class VI(Recording, BackupMixin):
 
         assert not np.may_share_memory(data, self.data)
 
-        v, i = data
-        appliances = self.appliances
-
-        # if self.has_locs():
-            # print('da/db', da, db, self.cycle_size, data.shape[-1])
         xa, xb = self.locs.T
         drop = np.argwhere((a0 >= xb) | (b0 <= xa)).ravel()
         v, i, appliances, xa, xb = self._drop_components(
-            drop, v, i, appliances, xa, xb)
+            drop, *data, self.appliances, xa, xb)
 
         if v is None:
             return self.empty()
 
-        xa = np.clip(xa - a0 + da, a_min=da, a_max=data.shape[-1] - db)
-        xb = np.clip(xb - a0 + da, a_min=da, a_max=data.shape[-1] - db)
         locs = np.stack((xa, xb)).T
+        locs = np.clip(locs - a, a_min=da, a_max=data.shape[-1] - db)
 
         return self.new(v,
                         i,
