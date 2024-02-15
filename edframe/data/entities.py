@@ -294,8 +294,7 @@ class VI(Recording, BackupMixin):
 
         return self._locs.copy()
 
-    def split_locs(self):
-        # TODO revise concept based on this
+    def split_locs(self, mode='onchange'):
         if self.is_empty():
             return None
 
@@ -308,21 +307,30 @@ class VI(Recording, BackupMixin):
         for a, b in locs:
             x[a:b] += 1
 
-        dx = np.diff(x, prepend=0)
+        locs = []
+        dx = np.diff(x, prepend=0, append=0)
         ids = np.argwhere((dx != 0)).ravel()
 
-        if len(ids) % 2 != 0:
-            ids = np.append(ids, len(x))
+        if mode == 'onchange':
 
-        locs = []
+            for i in range(len(ids) - 1):
+                a, b = ids[i], ids[i + 1]
 
-        for i in range(len(ids) - 1):
-            a, b = ids[i], ids[i + 1]
+                if (x[a:b] != 0).all():
+                    locs.append([a, b])
 
-            if (x[a:b] != 0).all():
-                locs.append([a, b])
+            locs = np.asarray(locs)
+        elif mode == 'running':
+            for id in ids:
+                if id == self.n_samples:
+                    locs.append(id)
+                elif x[id - 1] == 0 or x[id] == 0:
+                    locs.append(id)
 
-        locs = np.asarray(locs)
+            locs = np.asarray(locs)
+            locs = locs.reshape(-1, 2)
+        else:
+            raise ValueError
 
         return locs
 
@@ -470,34 +478,33 @@ class VI(Recording, BackupMixin):
             raise NotImplementedError
 
         data = self.data[..., a:b].copy()
+        da = a0 - a
+        db = b - b0
 
-        if a0 % self.cycle_size > 0:
-            data[1, ..., :a0 % self.cycle_size] = 0
+        if da > 0:
+            data[1, ..., :da] = 0
 
-        if b0 % self.cycle_size > 0:
-            data[1, ..., data.shape[-1] -
-                 (self.cycle_size - b0 % self.cycle_size):] = 0
+        if db > 0:
+            data[1, ..., -db:] = 0
 
         assert not np.may_share_memory(data, self.data)
 
         v, i = data
         appliances = self.appliances
 
-        if self.has_locs():
-            xa, xb = self.locs.T
+        # if self.has_locs():
+            # print('da/db', da, db, self.cycle_size, data.shape[-1])
+        xa, xb = self.locs.T
+        drop = np.argwhere((a0 >= xb) | (b0 <= xa)).ravel()
+        v, i, appliances, xa, xb = self._drop_components(
+            drop, v, i, appliances, xa, xb)
 
-            drop = np.argwhere((a0 >= xb) | (b0 <= xa)).ravel()
-
-            xa = np.maximum(xa - a0, 0)
-            xb = np.minimum(xa + b0 - a0, xb - a0)
-            locs = np.stack((xa, xb)).T
-            locs = np.clip(locs, a_min=0, a_max=data.shape[-1])
-
-            v, i, appliances, locs = self._drop_components(
-                drop, v, i, appliances, locs)
-
-        if v is None or i is None:
+        if v is None:
             return self.empty()
+
+        xa = np.clip(xa - a0 + da, a_min=da, a_max=data.shape[-1] - db)
+        xb = np.clip(xb - a0 + da, a_min=da, a_max=data.shape[-1] - db)
+        locs = np.stack((xa, xb)).T
 
         return self.new(v,
                         i,
