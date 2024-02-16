@@ -7,18 +7,18 @@ from functools import reduce
 
 from edframe.data.entities import VI
 from edframe.data.generators import make_hf_cycles, make_oscillations
-from edframe.events._detectors import ThresholdBasedDetector
+from edframe.features import spectral_centroid
+from edframe.events._detectors import ThresholdBasedDetector, DerivativeBasedDetector
 
 # Experiment setup
 F0 = [40, 45, 49.8, 50, 51.123, 55, 59.45646, 60, 60.8123, 65]
 FS = [1111, 2132, 4558, 5000, 4000, 9999, 10001]
-# N_CYCLES = [1, 2, 3, 4, 5, 10, 11, 20, 23, 50, 57]
-N_CYCLES = [10, 11, 15]
+N_CYCLES = [1, 2, 3, 4, 5, 10, 11, 20, 23, 50, 57]
 N_COMPONENTS = [1, 2, 3, 4, 5, 10, 20]
 RANDOM_STATE = 42
 N_CHOICES = 5
 V_DC_OFFSET = 0
-N_SIGNATURES = 10
+N_SIGNATURES = 100
 N_SIGNATURES_PER_ITER = 1
 ITERGRID = list(
     it.islice(it.product(F0, FS, N_CYCLES),
@@ -29,13 +29,20 @@ rng = np.random.RandomState(RANDOM_STATE)
 # rng = np.random.RandomState(None)
 
 
-def init_signatures(with_components=False, noclip=False):
-    signatures = []
+def make_vi_test_sample(
+    with_components=False,
+    random_crop=False,
+    random_nolabel=True,
+    constant_spectrum=False,
+    unitscale=False,
+    **kwargs,
+):
+    sample = []
 
     for f0, fs, n_cycles in ITERGRID:
-        dt = n_cycles / f0
         output_size = math.ceil(fs / f0)
         h_loc = output_size // 2
+        dt = 1 / f0 if constant_spectrum else n_cycles / f0
 
         if with_components:
             n_signatures = max(N_COMPONENTS) * N_SIGNATURES_PER_ITER
@@ -50,8 +57,17 @@ def init_signatures(with_components=False, noclip=False):
                                  h_loc=h_loc)
         y = y.tolist()
 
-        t = np.linspace(0, dt, I.shape[1])
+        if unitscale:
+            I /= abs(I).max(1, keepdims=True)
+
+        if constant_spectrum:
+            I = np.repeat(I[:, None], n_cycles, axis=1)
+            I = I.reshape(len(I), -1)
+            dt *= n_cycles
+
+        t = np.linspace(kwargs.get('eps', 1e-12), 1 / f0, output_size)
         v = np.sin(2 * np.pi * f0 * t) + V_DC_OFFSET
+        v = np.repeat(v[None], n_cycles, axis=0).ravel()
         V = np.stack(np.repeat(v[None], len(I), axis=0))
 
         if len(I) // 2 == 0:
@@ -59,12 +75,11 @@ def init_signatures(with_components=False, noclip=False):
         else:
             dropsize = len(I) // 2
 
-        for j in rng.choice(len(y), size=dropsize, replace=False):
-            y[j] = None
+        if random_nolabel:
+            for j in rng.choice(len(y), size=dropsize, replace=False):
+                y[j] = None
 
-        if noclip:
-            locs = [None] * len(y)
-        else:
+        if random_crop:
             a = np.random.randint(0, I.shape[1] - 1, size=len(I))
             b = np.random.randint(a + 1, I.shape[1], size=len(I))
             locs = np.stack((a, b), axis=1).tolist()
@@ -76,15 +91,17 @@ def init_signatures(with_components=False, noclip=False):
                 if locs_ is not None:
                     a, b = locs_
                     I[j][:a], I[j][b:] = 0, 0
+        else:
+            locs = [None] * len(y)
 
-        signatures_ = [
+        signatures = [
             VI(v,
                i,
                fs,
                f0,
-               appliances=y_,
+               appliances=appliances,
                locs=None if locs_ is None else [locs_])
-            for v, i, y_, locs_ in zip(V, I, y, locs)
+            for v, i, appliances, locs_ in zip(V, I, y, locs)
         ]
 
         if with_components:
@@ -93,38 +110,27 @@ def init_signatures(with_components=False, noclip=False):
                                       N_SIGNATURES_PER_ITER,
                                       replace=replace)
 
-            for n_components_ in n_components:
-                replace = n_components_ > len(signatures_)
-                combs_ = rng.choice(len(signatures_),
-                                    n_components_,
-                                    replace=replace)
-                rolls = rng.choice(I.shape[1], len(combs_))
-                combs_ = [
-                    signatures_[i].unitscale() for i, n in zip(combs_, rolls)
-                ]
-                signatures.append(sum(combs_))
+            for n in n_components:
+                replace = n > len(signatures)
+                combs = rng.choice(len(signatures), n, replace=replace)
+                combs = [signatures[i] for i in combs]
+                sample.append(combs)
         else:
-            signatures.extend([
-                VI(v,
-                   i,
-                   fs,
-                   f0,
-                   appliances=y_,
-                   locs=None if locs_ is None else [locs_])
-                for v, i, y_, locs_ in zip(V, I, y, locs)
-            ])
+            sample.extend(signatures)
 
-    return signatures
+    return sample
 
 
 class TestThresholdBasedDetector(test.TestCase):
-    signatures = init_signatures(with_components=True, noclip=True)
+    signatures = make_vi_test_sample(with_components=True, random_crop=True)
 
     def test_threshold_based_detector(self):
-        amp = lambda x: abs(x).max()
-        tbd = ThresholdBasedDetector(amp, 1, 0)
+        k = 0
+        tbd = ThresholdBasedDetector(lambda x: abs(x).max(), 1, 0)
 
         for vi in self.signatures:
+            vi = sum(vi)
+
             a = np.random.randint(0, vi.n_samples - 1)
             b = np.random.randint(a + 1, vi.n_samples)
             vi = vi[a:b]
@@ -133,6 +139,40 @@ class TestThresholdBasedDetector(test.TestCase):
                 continue
 
             xlocs = vi.split_locs(mode='running')
-            locs = tbd.callback(vi)
-            self.assertTrue(np.allclose(locs, xlocs),
-                            msg=f'{a} {b}\n{xlocs}\n{locs}\n{vi.locs}')
+            locs = tbd(vi)
+            self.assertTrue(np.allclose(locs, xlocs))
+
+            k += 1
+
+        self.assertGreaterEqual(k, len(self.signatures) // 2)
+
+
+class TestDerivativeBasedDetector(test.TestCase):
+    '''
+    Testing derivative based event detector with the window size of a cycle size
+    '''
+    signatures = make_vi_test_sample(with_components=True,
+                                     random_crop=False,
+                                     constant_spectrum=True)
+
+    def test_derivative_based_detector(self):
+        k = 0
+
+        for vi in self.signatures:
+            vi = sum(vi)
+            dbd = DerivativeBasedDetector(spectral_centroid,
+                                          vi.cycle_size,
+                                          1e-8,
+                                          rel=False,
+                                          fill_nan=0)
+
+            if vi.is_empty():
+                continue
+
+            xlocs = vi.split_locs(mode='onchange')
+            locs = dbd(vi)
+            self.assertTrue(np.allclose(locs, xlocs))
+
+            k += 1
+
+        self.assertGreaterEqual(k, len(self.signatures) // 2)

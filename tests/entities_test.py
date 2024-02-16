@@ -439,6 +439,7 @@ class TestVI(test.TestCase):
             self.assertIsNot(id(vi_._locs), id(vi._locs))
 
     def test_unitscale(self):
+        # TODO test if cycle_wise=True
         for comps in self.signatures:
             vi = sum(comps)
             vi_ = vi.unitscale()
