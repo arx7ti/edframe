@@ -1033,7 +1033,7 @@ class VISet(DataSet, BackupMixin):
 
     @property
     def n_appliances(self):
-        return len(self.appliances)
+        return len(self.appliance_types)
 
     @property
     def n_signatures(self):
@@ -1056,7 +1056,6 @@ class VISet(DataSet, BackupMixin):
     @property
     def labels(self):
         labels = [vi.labels for vi in self.signatures]
-        print(labels)
 
         return labels
 
@@ -1134,7 +1133,7 @@ class VISet(DataSet, BackupMixin):
             for vi in signatures:
                 self._hashes.add(vi.hash())
 
-        self.signatures = signatures
+        self.signatures = signatures.copy()
         self._n_samples = n_samples[0]
         self._fs = fs[0]
         self._f0 = f0[0]
@@ -1199,6 +1198,51 @@ class VISet(DataSet, BackupMixin):
         signatures = [self.signatures[i] for i in ids]
 
         return self.new(signatures)
+
+    def append(self, signature):
+        n_samples = signature.n_samples
+        fs = signature.fs
+        f0 = signature.f0
+
+        if n_samples != self.n_samples:
+            raise ValueError
+
+        if fs != self.fs:
+            raise ValueError
+
+        if f0 != self.f0:
+            raise ValueError
+
+        self.signatures.append(signature)
+
+    def extend(self, signatures):
+        n_samples = [vi.n_samples for vi in signatures]
+        fs = [vi.fs for vi in signatures]
+        f0 = [vi.f0 for vi in signatures]
+
+        if len(set(n_samples)) > 1:
+            raise ValueError
+
+        if len(set(fs)) > 1:
+            raise ValueError
+
+        if len(set(f0)) > 1:
+            raise ValueError
+
+        n_samples = n_samples[0]
+        fs = fs[0]
+        f0 = f0[0]
+
+        if n_samples != self.n_samples:
+            raise ValueError
+
+        if fs != self.fs:
+            raise ValueError
+
+        if f0 != self.f0:
+            raise ValueError
+
+        self.signatures.extend(signatures)
 
     @safe_mode
     def features(self, features=None, format='list', **kwargs):
