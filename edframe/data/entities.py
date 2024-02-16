@@ -189,11 +189,19 @@ class VI(Recording, BackupMixin):
 
     @property
     def vfold(self):
+        return self.v.reshape(self.n_cycles, self.cycle_size)
+
+    @property
+    def ifold(self):
+        return self.i.reshape(self.n_cycles, self.cycle_size)
+
+    @property
+    def vcfold(self):
         return self.vc.reshape(self.n_components, self.n_cycles,
                                self.cycle_size)
 
     @property
-    def ifold(self):
+    def icfold(self):
         return self.ic.reshape(self.n_components, self.n_cycles,
                                self.cycle_size)
 
@@ -303,13 +311,12 @@ class VI(Recording, BackupMixin):
 
         locs = self.locs
         x = np.zeros(self.n_samples)
+        ids = np.unique(np.sort(locs.ravel()))
 
         for a, b in locs:
-            x[a:b] += 1
+            x[a:b] = 1
 
         locs = []
-        dx = np.diff(x, prepend=0, append=0)
-        ids = np.argwhere((dx != 0)).ravel()
 
         if mode == 'onchange':
 
@@ -322,7 +329,7 @@ class VI(Recording, BackupMixin):
             locs = np.asarray(locs)
         elif mode == 'running':
             for id in ids:
-                if id == self.n_samples:
+                if id == 0 or id == self.n_samples:
                     locs.append(id)
                 elif x[id - 1] == 0 or x[id] == 0:
                     locs.append(id)
@@ -426,7 +433,9 @@ class VI(Recording, BackupMixin):
         with_components = len(v.shape) == 2
         with_orthogonals = len(v.shape) == 3
 
-        if not with_components and not with_orthogonals:
+        if not with_orthogonals and with_components:
+            v, i = v[None], i[None]
+        elif not with_components and not with_orthogonals:
             v, i = v[None, None], i[None, None]
 
         self._check_voltage(v, T)
@@ -434,6 +443,7 @@ class VI(Recording, BackupMixin):
         data = np.stack((v, i))
         self._f0 = f0
         self._T = T
+        # TODO which decomposition if passed with orthogonals
         self._orthogonality = kwargs.get('orthogonality', None)
 
         super().__init__(data, fs, appliances=appliances, locs=locs)
@@ -643,6 +653,8 @@ class VI(Recording, BackupMixin):
         '''
         cycle-wise roll 
         '''
+        # TODO component-wise rolling
+
         if self.is_empty() or n > self.n_samples:
             return self.empty()
         elif n == 0:
@@ -790,12 +802,16 @@ class VI(Recording, BackupMixin):
                         appliances=self.appliances,
                         locs=locs)
 
-    def unitscale(self):
+    def unitscale(self, cycle_wise=False):
         if self.is_empty():
             return self.empty()
 
-        v = self.vc / abs(self.v).max()
-        i = self.ic / abs(self.i).max()
+        if cycle_wise:
+            raise NotImplementedError
+        else:
+            v = self.vc / abs(self.v).max()
+            i = self.ic / abs(self.i).max()
+
         locs = self.locs if self.has_locs() else None
 
         return self.new(v,
