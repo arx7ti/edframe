@@ -12,46 +12,60 @@ import math
 import warnings
 import numpy as np
 
-# from ..entities import DataSet
+
+def _distribute_samples(n_samples, n_appliances, n_modes_per_appliance):
+    if not isinstance(n_modes_per_appliance, list | np.ndarray):
+        n_modes_per_appliance = np.asarray([n_modes_per_appliance] *
+                                           n_appliances)
+
+    n_modes_per_appliance = np.asarray(n_modes_per_appliance)
+    assert n_appliances == len(n_modes_per_appliance)
+    assert np.all(n_modes_per_appliance > 0)
+    n_clusters = n_modes_per_appliance.sum()
+
+    if not isinstance(n_samples, list | np.ndarray):
+        n_spc = n_samples // n_clusters
+        n_spc = n_spc * np.ones(n_clusters, dtype=int)
+        n_spc[np.arange(n_samples - n_spc.sum()) % n_clusters] += 1
+        assert n_spc.sum() == n_samples
+    else:
+        n_samples = np.asarray(n_samples)
+        n_spc = n_samples // n_modes_per_appliance
+        n_spc = np.repeat(n_spc, n_modes_per_appliance)
+        n_spc[np.arange(n_samples.sum() - n_spc.sum()) % n_clusters] += 1
+        assert len(n_spc) == n_clusters
+
+    # Class indices with regards to the clusters
+    class_for_cluster = np.repeat(np.arange(n_appliances),
+                                  n_modes_per_appliance)
+
+    return n_spc, class_for_cluster
 
 
 class Composer:
 
-    def __init__(
-        self,
-        dataset: DataSet,
-        random_state: Optional[int] = None,
-    ) -> None:
-        # TODO concat datasets
-        self._dataset = dataset
-        self._domains = []
-        labels = dataset.labels
-
-        if np.any(labels.sum(1) > 1):
+    def __init__(self, dataset, random_state: Optional[int] = None) -> None:
+        if dataset.is_multilabel():
             raise ValueError(
-                "Datasets of stand-alone appliances only are supported")
+                "Only dataset of individual appliances is supported")
 
-        for j in range(len(dataset.class_names)):
-            domain = np.argwhere(labels[:, j] == 1).ravel()
-            self._domains.append(domain)
+        self._dataset = dataset
+        self.D = []
+        Y = dataset.targets
 
-        self._rng_state = random_state
+        for k in range(dataset.n_appliances):
+            domain = np.argwhere(Y[:, k] == 1).ravel()
+            self.D.append(domain)
 
-        if random_state is not None:
-            seed_shift = dataset.hash(int)
-            modified_seed = random_state + seed_shift
-        else:
-            modified_seed = random_state
+        # self._rng_state = random_state
 
-        self._rng = np.random.RandomState(modified_seed)
+        # if random_state is not None:
+        #     # seed_shift = dataset.hash()
+        #     # modified_seed = random_state + seed_shift
+        # else:
+        #     modified_seed = random_state
 
-    @property
-    def dataset(self):
-        return self._dataset
-
-    @property
-    def domains(self):
-        return self._domains
+        self._rng = np.random.RandomState(random_state)
 
     # def _save_sample(
     #     self,
@@ -66,172 +80,101 @@ class Composer:
     #     file_path = os.path.join(self.dir_path, file_name)
     #     np.save(file_path, data)
 
-    def sample(
-        self,
-        n_samples: int = 100,
-        n_classes: int = 2,
-        n_reps: int | tuple[int, int] | Iterable = None,
-    ):
-        if n_reps is None:
-            n_reps_min, n_reps_max = 1, 1
-        elif isinstance(n_reps, int):
-            n_reps_min, n_reps_max = n_reps, n_reps
-        elif isinstance(n_reps, tuple):
-            n_reps_min, n_reps_max = n_reps
-        elif isinstance(n_reps, Iterable):
-            n_reps_min, n_reps_max = [], []
-            assert len(n_reps) == self.dataset.n_classes
-
-            for n in n_reps:
-                if isinstance(n, int):
-                    n_min, n_max = n, n
-                elif isinstance(n, tuple):
-                    n_min, n_max = n
-                else:
-                    raise ValueError
-
-                n_reps_min.append(n_min)
-                n_reps_max.append(n_max)
-
-            n_reps_min = np.asarray(n_reps_min)
-            n_reps_max = np.asarray(n_reps_max)
-        else:
-            raise ValueError
-
+    def _find_appliances(self, n_signatures, n_appliances, replace=False):
         Y = set()
-        n_combs_max = math.comb(self.dataset.n_classes, n_classes)
-        n_combs = min(n_samples, n_combs_max)
-        class_indices = list(range(self.dataset.n_classes))
+        n_combs_max = math.comb(len(self.D), n_appliances)
+        n_combs = min(n_signatures, n_combs_max)
+        class_indices = np.arange(len(self.D))
 
         while len(Y) < n_combs:
-            comb = self._rng.choice(class_indices, n_classes, replace=False)
+            comb = self._rng.choice(class_indices, n_appliances, replace)
             comb = tuple(sorted(comb))
 
             if comb not in Y:
                 Y.add(comb)
 
-        Y = list(map(list, Y))
-        # Repetitions of each appliance
-        R = self._rng.randint(n_reps_min,
-                              n_reps_max + 1,
-                              size=(len(Y), self.dataset.n_classes))
-        # Distribution of samples per combination
-        p = n_samples // len(Y)
-        p = np.asarray([p] * len(Y))
-        c_size = n_samples % len(Y)
-        # Correction for `p`
-        c = self._rng.choice(range(len(p)), size=c_size, replace=False)
-        p[c] += 1
-        # Final set of indices
-        I = set()
+        return list(Y)
 
-        for y, r, pi in zip(Y, R, p):
-            dj = [(self.domains[j], j) for j in y]
-            n_max = reduce(
-                lambda x, y: x * y,
-                [math.comb(len(djk) + r[j] - 1, r[j]) for djk, j in dj])
-            Ii = set()
+    def _find_signatures(self, n_signatures, Y, replace):
+        S = set()
+        N, _ = _distribute_samples(n_signatures, len(Y), 1)
 
-            while len(Ii) < min(pi, n_max, sys.maxsize):
+        for y, n in zip(Y, N):
+            Si = set()
+            Di = [(self.D[j], j) for j in y]
+            r = dict(zip(*np.unique(y, return_counts=True)))
+
+            if replace:
+                n_max = sys.maxsize
+            else:
+                n_max = reduce(
+                    lambda x, y: x * y,
+                    [math.comb(len(d) + r[k] - 1, r[k]) for d, k in Di])
+
+            while len(Si) < min(n, n_max, sys.maxsize):
                 sample = []
 
-                for djk, j in dj:
-                    tmp = self._rng.randint(0, len(djk), size=r[j])
-                    sample.extend(djk[tmp])
+                for d, k in Di:
+                    repeat = r[k] > len(d) or replace
+                    sample.extend(d[self._rng.choice(len(d), r[k], repeat)])
 
                 sample = tuple(sorted(sample))
 
-                if sample not in Ii:
-                    Ii.add(sample)
+                if sample not in Si:
+                    Si.add(sample)
 
-            I |= Ii
+            S |= Si
 
-        loss = n_samples - len(I)
-        # print(loss)
+        return list(map(list, S))
 
-        if loss > 0:
-            # FIXME not correct
-            warnings.warn('%d samples were not obtained due to '
-                          'combinatorial limit.' % loss)
+    def _compose(self, S):
+        Snew = []
 
-        I = list(map(list, I))
+        for s in S:
+            s = sum(self._dataset[s].signatures)
+            Snew.append(s)
 
-        return I
+        return Snew
 
-    def roll(
+    def _random_roll(self, S, max_roll=0.9):
+        assert max_roll != 1.0
+
+        Snew = []
+        max_roll = int(max_roll * (self._dataset.n_samples - 1))
+        a, b = -max_roll, max_roll
+
+        for s in S:
+            n = self._rng.randint(a, b + 1, size=s.n_appliances)
+            s = s.roll(n)
+            Snew.append(s)
+
+        return Snew
+
+    def make_signatures(
         self,
-        combs: list[list[int]],
-        n_rolls: int = 0,
-        dn: float = 0.,
-    ) -> list[list[int]]:
-        rolls = []
-        window_size = self.dataset.values.shape[1]  # TODO if 2d
-        dn = round(dn * window_size)
-
-        for comb in combs:
-            if n_rolls > 0:
-                _rolls = set()
-                n_rolls_max = 2 * (window_size - dn) - 1
-                # -1 stands for len(combs) - 1
-                n_combs_max = math.comb(
-                    len(comb) + n_rolls_max - 2, n_rolls_max)
-
-                while len(_rolls) < min(n_rolls, n_combs_max):
-                    __rolls = self._rng.choice(
-                        range(-window_size + dn + 1, window_size - dn),
-                        len(comb) - 1)
-                    __rolls = [0] + __rolls
-                    __rolls = tuple(__rolls)
-
-                    if __rolls not in _rolls:
-                        _rolls.add(__rolls)
-
-                _rolls = list(_rolls)
-            else:
-                _rolls = [[0] * len(comb)]
-
-            rolls.append(_rolls)
-
-        return rolls
-
-    def compose(self, idxs, rolls):
-        raise NotImplementedError
-
-    def make_samples(
-        self,
-        n_samples: int = 100,
-        n_classes: int = 2,
-        n_reps: np.ndarray = None,
-        n_rolls: int = 1,
-        dn=0.,
+        n_signatures: int = 100,
+        n_appliances: int = 2,
+        replace: bool = False,
+        random_roll: bool = False,
+        **kwargs,
     ):
-        if n_classes > self.dataset.n_classes:
+        if len(self.D) < n_appliances and not replace:
             raise ValueError
 
-        samples = []
-        I = self.sample(n_samples=n_samples,
-                        n_classes=n_classes,
-                        n_reps=n_reps)
-        R = self.roll(I, n_rolls=n_rolls, dn=dn)
+        Y = self._find_appliances(n_signatures, n_appliances, replace)
+        S = self._find_signatures(n_signatures, Y, random_roll)
+        S = self._compose(S)
 
-        for i, r in tqdm(zip(I, R), total=len(I)):
-            samples.extend(self.compose(i, r))
+        if random_roll:
+            S = self._random_roll(S, kwargs.get('max_roll', .9))
 
-        dataset = self.dataset.new(samples)
+        S = self._dataset.new(S, safe_mode=self._dataset._safe_mode)
 
-        return dataset
+        dn = n_signatures - len(S)
 
+        if dn > 0:
+            # FIXME not correct
+            warnings.warn(f'{dn} samples were not obtained due to '
+                          'combinatorial limit.')
 
-class HComposer(Composer):
-
-    def compose(self, idxs, rolls):
-        samples = []
-        components = [self.dataset[int(i)] for i in idxs]
-        sample0 = components.pop(0)
-
-        # FIXME if 1 component 
-        for r in rolls:
-            sample = reduce(add, [x.roll(rx) for x, rx in zip(components, r)])
-            samples.append(sample0 + sample)
-
-        return samples
+        return S
