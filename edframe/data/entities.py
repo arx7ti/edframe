@@ -36,6 +36,7 @@ class Recording:
         return self.data.shape[0]
 
     @property
+    # TODO rename to appliances
     def n_components(self):
         if self.is_empty():
             return 0
@@ -658,11 +659,17 @@ class VI(Recording, BackupMixin):
         '''
         cycle-wise roll 
         '''
-        # TODO component-wise rolling
+        if not hasattr(n, '__len__'):
+            n = [n] * self.n_appliances
 
-        if self.is_empty() or n > self.n_samples:
+        n = np.asarray(n)
+
+        if len(n) != self.n_appliances:
+            raise ValueError
+
+        if self.is_empty() or (n > self.n_samples).all():
             return self.empty()
-        elif n == 0:
+        elif (n == 0).all():
             return self.new(self.vc,
                             self.ic,
                             self.fs,
@@ -670,19 +677,25 @@ class VI(Recording, BackupMixin):
                             appliances=self.appliances,
                             locs=self.locs if self.has_locs() else None)
 
-        n_cycles = n // self.cycle_size * self.cycle_size
-        v, i = np.roll(self.data, n_cycles, axis=-1)
+        data = np.empty((2, 0, self.n_orthogonals, self.n_samples))
 
-        mute = np.s_[n:] if n < 0 else np.s_[:n]
-        mute = np.s_[..., mute]
-        i[mute] = 0
+        for k, nk in zip(range(self.n_appliances), n):
+            n_cycles = nk // self.cycle_size * self.cycle_size
+            vk, ik = np.roll(self.data[:, k], n_cycles, axis=-1)
+            mute = np.s_[nk:] if nk < 0 else np.s_[:nk]
+            mute = np.s_[..., mute]
+            ik[mute] = 0
+            data_k = np.stack((vk, ik), axis=0)[:, None]
+            data = np.concatenate((data, data_k), axis=1)
 
         appliances = self.appliances
-        locs = np.clip(self.locs + n, a_min=0, a_max=self.n_samples)
-
+        locs = np.clip(self.locs + n[:, None], a_min=0, a_max=self.n_samples)
         drop = np.argwhere(locs[:, 0] > self.n_samples).ravel()
-        v, i, appliances, locs = self._drop_components(drop, v, i, appliances,
+        v, i, appliances, locs = self._drop_components(drop, *data, appliances,
                                                        locs)
+
+        if v is None:
+            return self.empty()
 
         return self.new(v,
                         i,
@@ -1152,7 +1165,7 @@ class VISet(DataSet, BackupMixin):
         elif isinstance(indexer, int):
             indexer = [indexer]
             just_signature = True
-        else:
+        elif not isinstance(indexer, list):
             raise ValueError
 
         indexer = np.asarray(indexer)
