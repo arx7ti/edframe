@@ -84,6 +84,11 @@ class Recording:
         # User-defined data
         self._data = data
         self._fs = fs
+
+        # TODO -1 for unknown appliances
+        if appliances is not None:
+            appliances = [-1 if a is None else a for a in appliances]
+
         self._appliances = appliances
         self._locs = locs
 
@@ -219,7 +224,7 @@ class VI(Recording, BackupMixin):
             # TODO test for drop if locs dropped
             return self._appliances.copy()
 
-        return [None]
+        return [-1]
 
     @property
     def labels(self):
@@ -1051,6 +1056,7 @@ class VISet(DataSet, BackupMixin):
     @property
     def labels(self):
         labels = [vi.labels for vi in self.signatures]
+        print(labels)
 
         return labels
 
@@ -1108,49 +1114,28 @@ class VISet(DataSet, BackupMixin):
 
         return cls(data, safe_mode=safe_mode)
 
-    def __init__(
-        self,
-        signatures: list[VI],
-        n_cycles='median',
-        safe_mode=True,
-    ):
+    def __init__(self, signatures: list[VI], safe_mode=True):
         n_samples = [vi.n_samples for vi in signatures]
         fs = [vi.fs for vi in signatures]
         f0 = [vi.f0 for vi in signatures]
 
-        if not all([fs[0] == f for f in fs[1:]]):
+        if len(set(n_samples)) > 1:
             raise ValueError
 
-        if not all([f0[0] == f for f in f0[1:]]):
+        if len(set(fs)) > 1:
             raise ValueError
 
-        if n_cycles == 'median':
-            n_samples = np.median(n_samples)
-        elif n_cycles == 'mean':
-            n_samples = np.mean(n_samples)
-        else:
+        if len(set(f0)) > 1:
             raise ValueError
 
         self._hashes = set()
-        new_signatures = []
-        n_samples = int(math.ceil(n_samples))
 
-        while len(signatures) > 0:
-            vi = signatures.pop(0)
-            dn = n_samples - len(vi)
-
-            if dn > 0:
-                vi = vi.extrapolate((0, dn))
-            elif dn < 0:
-                vi = vi[:n_samples]
-
-            if safe_mode:
+        if safe_mode:
+            for vi in signatures:
                 self._hashes.add(vi.hash())
 
-            new_signatures.append(vi)
-
-        self.signatures = new_signatures
-        self._n_samples = n_samples
+        self.signatures = signatures
+        self._n_samples = n_samples[0]
         self._fs = fs[0]
         self._f0 = f0[0]
         self._safe_mode = safe_mode
