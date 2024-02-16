@@ -260,6 +260,7 @@ class TestVI(test.TestCase):
         for vi in self.signatures:
             vi = sum(vi)
 
+            # TODO test n as array
             for n in rng.choice(len(vi) + 1, N_CHOICES, replace=False):
                 vi_ = vi.roll(n)
 
