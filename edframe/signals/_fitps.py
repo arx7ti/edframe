@@ -54,7 +54,7 @@ class FITPS:
         v = self._allocate(v, v0, dv, ns)
         i = self._allocate(i, v0, dv, ns)
 
-        if locs is not None:
+        if locs is not None and None not in locs:
             if not isinstance(locs, np.ndarray):
                 locs = np.asarray(locs)
 
@@ -162,4 +162,5 @@ class FITPS:
                 k2 = np.int32(np.floor(k1))
                 k3 = np.int32(np.ceil(k1))
                 mat[j, k] = vec[k2] + (vec[k3] - vec[k2]) * dv[j]
+
         return mat
