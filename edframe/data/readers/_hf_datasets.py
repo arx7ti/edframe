@@ -6,8 +6,8 @@ import json
 import numpy as np
 import pandas as pd
 
+from typing import Optional
 from collections.abc import Sequence
-from typing import Optional, Callable, Union
 
 
 class ExhaustiveArgumentError(Exception):
@@ -22,150 +22,108 @@ class Reader(Sequence):
     pass
 
 
-def default_label(label: str) -> str:
-    """
-    Format a label by default
-
-    Arguments:
-        label: str
-    Returns:
-        str
-    """
-    label = label.lower().replace(' ', '_')
-    return label
-
-
 class PLAID(Reader):
 
-    def __init__(
-        self,
-        dataset_path: str,
-        metadata: Optional[dict] = None,
-        metadata_path: Optional[str] = None,
-        dtype=None,
-        label_fn: Optional[Callable] = None,
-    ):
-        self._dataset_path = dataset_path
-        if metadata is not None:
-            if metadata_path is not None:
-                raise ExhaustiveArgumentError('metadata_path')
-            self._metadata = metadata
-        elif metadata_path is not None:
-            if metadata is not None:
-                raise ExhaustiveArgumentError('metadata')
-            with open(metadata_path) as j:
-                self._metadata = json.load(j)
-        else:
-            raise ValueError('Metadata is required')
-        self._metadata = list(
-            sorted(self._metadata.items(), key=lambda x: int(x[0])))
-        self._dtype = np.float32 if dtype is None else dtype
-        self._label_fn = label_fn
-        return None
+    def __init__(self, dirpath: str, metadata: dict | str):
+        self._dirpath = dirpath
+
+        if isinstance(metadata, str):
+            with open(metadata) as jf:
+                metadata = json.load(jf)
+        elif not isinstance(metadata, dict):
+            raise ValueError
+
+        self.metadata = list(sorted(metadata.items(), key=lambda x: int(x[0])))
 
     def __len__(self):
-        return len(self._metadata)
+        return len(self.metadata)
 
-    def __getitem__(
-        self,
-        idxs: Union[slice, int],
-    ) -> tuple[str, np.ndarray, np.ndarray, int]:
-        if isinstance(idxs, slice):
-            iterator = self._metadata[idxs]
-        elif isinstance(idxs, list):
-            iterator = [self._metadata[idx] for idx in idxs]
-        elif isinstance(idxs, int):
-            iterator = []
+    def __getitem__(self, indexer: slice | int):
+        if isinstance(indexer, slice):
+            iterator = self.metadata[indexer]
+        elif isinstance(indexer, list):
+            iterator = [self.metadata[idx] for idx in indexer]
+        elif isinstance(indexer, int):
+            iterator = [self.metadata[indexer]]
         else:
             raise ValueError
 
-        if len(iterator) > 0:
-            samples = []
-            for sample_idx, meta in iterator:
-                sample = self._get(sample_idx, meta)
-                samples.append(sample)
-            return samples
-        else:
-            idx = idxs
-            sample_idx, meta = self._metadata[idx]
-            sample = self._get(sample_idx, meta)
-            return sample
+        recordings = []
 
-    def _get_label(self, app_info: dict) -> str:
-        label = app_info['type']
-        if self._label_fn is not None:
-            label = self._label_fn(label)
-        return label
+        for idx, metadata in iterator:
+            fs = metadata['header']['sampling_frequency']
+            fs = int(fs.replace('Hz', ''))
+            filename = f'{idx}.csv'
+            filepath = os.path.join(self._dirpath, filename)
 
-    def _get_target(
-        self,
-        app_meta: dict,
-        maxlen: Optional[int] = None,
-    ) -> Union[str, tuple[str, list[tuple[int, int]]]]:
-        label = self._get_label(app_meta)
-        if app_meta.get('on') and app_meta.get('off'):
-            assert maxlen is not None
-            parse_fn = lambda x: re.findall("\d+", x)
-            locs_on = list(map(int, parse_fn(app_meta["on"])))
-            locs_off = list(map(int, parse_fn(app_meta["off"])))
-            if len(locs_on) - len(locs_off) == 1:
-                locs_off.append(maxlen - 1)
-            elif len(locs_on) - len(locs_off) > 1:
-                print(locs_on)
-                print(locs_off)
-                raise NotImplementedError
-            locs = list(zip(locs_on, locs_off))
-            return label, locs
-        else:
-            return label
+            # Read the waveforms
+            waveforms = pd.read_csv(filepath, names=['current', 'voltage'])
+            v = waveforms.voltage.to_numpy()
+            i = waveforms.current.to_numpy()
 
-    def _get_targets(
-        self,
-        apps_meta,
-        maxlen: int,
-    ) -> tuple[list[str], list[int]]:
-        labels = []
+            # Read the meta information about an appliance/appliances
+            if 'appliance' in metadata:
+                apps_data = [metadata['appliance']]
+            elif 'appliances' in metadata:
+                apps_data = metadata['appliances']
+
+            appliances, locs = self._parse_appliances(apps_data, len(i))
+            recordings.append((v, i, fs, appliances, locs))
+
+        return recordings
+
+    def _parse_appliances(self, apps_data, n_samples: int = None):
+        appliances = []
         locs = []
-        for app_meta in apps_meta:
-            label, app_locs = self._get_target(app_meta, maxlen=maxlen)
-            labels += [label] * len(app_locs)
-            locs += app_locs
-        if len(labels) > 1:
-            ord = sorted(range(len(labels)), key=lambda idx: labels[idx])
-            labels = [labels[idx] for idx in ord]
+
+        for app_data in apps_data:
+            labels, app_locs = self._parse_appliance(app_data, n_samples)
+            appliances.extend(labels)
+            locs.extend(app_locs)
+
+        if len(appliances) > 1:
+            ord = sorted(range(len(appliances)),
+                         key=lambda idx: appliances[idx])
+            appliances = [appliances[idx] for idx in ord]
             locs = [locs[idx] for idx in ord]
+
+        return appliances, locs
+
+    def _parse_appliance(self, app_data, n_samples=None):
+        app_label = self.default_label(app_data['type'])
+
+        if app_data.get('on') and app_data.get('off'):
+            assert n_samples is not None
+
+            parse_fn = lambda x: re.findall("\d+", x)
+            locs_on = list(map(int, parse_fn(app_data["on"])))
+            locs_off = list(map(int, parse_fn(app_data["off"])))
+            dn = len(locs_on) - len(locs_off)
+
+            assert dn >= 0
+
+            if dn > 0:
+                locs_off.extend([n_samples] * dn)
+
+            assert len(locs_on) == len(locs_off)
+
+            locs = list(zip(locs_on, locs_off))
+        else:
+            locs = [None]
+
+        labels = [app_label] * len(locs)
+
         return labels, locs
 
-    def _get(
-        self,
-        sample_idx: int,
-        meta: dict,
-    ) -> tuple[str, np.ndarray, np.ndarray]:
+    def default_label(self, label: str) -> str:
+        """
+        Format an appliance's label by default
 
-        # Read the waveforms
-        fs = int(meta['header']['sampling_frequency'].replace('Hz', ''))
-        filename = '{idx}.{ext}'.format(idx=sample_idx, ext='csv')
-        filepath = os.path.join(self._dataset_path, filename)
-        waveforms = pd.read_csv(filepath,
-                                names=['current', 'voltage'],
-                                dtype=self._dtype)
-        v = waveforms.voltage.to_numpy()
-        i = waveforms.current.to_numpy()
+        Arguments:
+            label: str
+        Returns:
+            str
+        """
+        label = label.lower().replace(' ', '_')
 
-        # Read the meta information about an appliance/appliances
-        keys = filter(lambda key: key.startswith('appliance'), meta.keys())
-        keys = list(keys)
-
-        if len(keys) != 1:
-            raise ValueError('Given meta-data is not supported')
-
-        key = keys[0]
-        apps_meta = meta[key]
-
-        if key.endswith('s'):
-            y, locs = self._get_targets(apps_meta, len(i))
-            return v, i, fs, y, locs
-
-        app_meta = apps_meta
-        y = self._get_target(app_meta)
-        return v, i, fs, y
+        return label
