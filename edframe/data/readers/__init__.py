@@ -1,1 +1,1 @@
-from ._hf_datasets import PLAID
+from ._hsr_datasets import PLAID

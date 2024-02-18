@@ -6,20 +6,7 @@ import json
 import numpy as np
 import pandas as pd
 
-from typing import Optional
-from collections.abc import Sequence
-
-
-class ExhaustiveArgumentError(Exception):
-
-    def __init__(self, arg_name, *args: object) -> None:
-        message = 'Argument "{}" is exhaustive'.format(arg_name)
-        self.message = message
-        return super().__init__(message, *args[1:])
-
-
-class Reader(Sequence):
-    pass
+from ._generics import Reader
 
 
 class PLAID(Reader):

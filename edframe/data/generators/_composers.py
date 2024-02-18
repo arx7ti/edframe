@@ -57,14 +57,6 @@ class Composer:
             domain = np.argwhere(Y[:, k] == 1).ravel()
             self.D.append(domain)
 
-        # self._rng_state = random_state
-
-        # if random_state is not None:
-        #     # seed_shift = dataset.hash()
-        #     # modified_seed = random_state + seed_shift
-        # else:
-        #     modified_seed = random_state
-
         self._rng = np.random.RandomState(random_state)
 
     # def _save_sample(
