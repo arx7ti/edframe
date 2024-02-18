@@ -7,11 +7,17 @@ import numpy as np
 import pandas as pd
 
 from ._generics import Reader
+from ...features import fundamental
 
 
 class PLAID(Reader):
 
-    def __init__(self, dirpath: str, metadata: dict | str):
+    def __init__(
+        self,
+        dirpath: str,
+        metadata: dict | str,
+        f0_mode='median',
+    ):
         self._dirpath = dirpath
 
         if isinstance(metadata, str):
@@ -21,17 +27,21 @@ class PLAID(Reader):
             raise ValueError
 
         self.metadata = list(sorted(metadata.items(), key=lambda x: int(x[0])))
+        self._f0_mode = f0_mode
 
     def __len__(self):
         return len(self.metadata)
 
     def __getitem__(self, indexer: slice | int):
+        item = False
+
         if isinstance(indexer, slice):
             iterator = self.metadata[indexer]
         elif isinstance(indexer, list):
             iterator = [self.metadata[idx] for idx in indexer]
         elif isinstance(indexer, int):
             iterator = [self.metadata[indexer]]
+            item = True
         else:
             raise ValueError
 
@@ -48,6 +58,8 @@ class PLAID(Reader):
             v = waveforms.voltage.to_numpy()
             i = waveforms.current.to_numpy()
 
+            f0 = fundamental(v, fs, mode=self._f0_mode)
+
             # Read the meta information about an appliance/appliances
             if 'appliance' in metadata:
                 apps_data = [metadata['appliance']]
@@ -55,7 +67,10 @@ class PLAID(Reader):
                 apps_data = metadata['appliances']
 
             appliances, locs = self._parse_appliances(apps_data, len(i))
-            recordings.append((v, i, fs, appliances, locs))
+            recordings.append((v, i, fs, f0, appliances, locs))
+
+        if item:
+            return recordings[0]
 
         return recordings
 
@@ -114,3 +129,9 @@ class PLAID(Reader):
         label = label.lower().replace(' ', '_')
 
         return label
+
+    def random(self, random_state=None):
+        rng = np.random.RandomState(random_state)
+        idx = rng.randint(len(self))
+
+        return self[idx]
