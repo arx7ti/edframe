@@ -53,9 +53,10 @@ def zero_crossing_rate(x, mode='median'):
     return x0_rate
 
 
-def fundamental(x, fs, mode='median'):
-    x0_rate = 2 * zero_crossing_rate(x, mode=mode)
-    f0 = fs / x0_rate
+def fundamental(x, fs):
+    amps = abs(np.fft.rfft(x))
+    freqs = np.fft.rfftfreq(len(x), 1 / fs)
+    f0 = freqs[np.argmax(amps)]
 
     return f0
 

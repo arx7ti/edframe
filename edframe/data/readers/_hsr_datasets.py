@@ -16,7 +16,7 @@ class PLAID(Reader):
         self,
         dirpath: str,
         metadata: dict | str,
-        f0_mode='median',
+        f0_decimals=2,
     ):
         self._dirpath = dirpath
 
@@ -27,7 +27,7 @@ class PLAID(Reader):
             raise ValueError
 
         self.metadata = list(sorted(metadata.items(), key=lambda x: int(x[0])))
-        self._f0_mode = f0_mode
+        self._f0_decimals = f0_decimals
 
     def __len__(self):
         return len(self.metadata)
@@ -58,7 +58,8 @@ class PLAID(Reader):
             v = waveforms.voltage.to_numpy()
             i = waveforms.current.to_numpy()
 
-            f0 = fundamental(v, fs, mode=self._f0_mode)
+            # Mains frequency estimation
+            f0 = round(fundamental(v, fs), self._f0_decimals)
 
             # Read the meta information about an appliance/appliances
             if 'appliance' in metadata:
