@@ -1156,7 +1156,7 @@ class VISet(DataSet, BackupMixin):
         return len(self.signatures)
 
     def __getitem__(self, indexer):
-        just_signature = False
+        item = False
 
         if isinstance(indexer, slice):
             a = 0 if indexer.start is None else indexer.start
@@ -1164,7 +1164,7 @@ class VISet(DataSet, BackupMixin):
             indexer = list(range(a, b))
         elif isinstance(indexer, int):
             indexer = [indexer]
-            just_signature = True
+            item = True
         elif not isinstance(indexer, list):
             raise ValueError
 
@@ -1182,7 +1182,7 @@ class VISet(DataSet, BackupMixin):
             # TODO return empty set
             return None
 
-        if just_signature:
+        if item:
             return signatures[0]
 
         return self.new(signatures)
