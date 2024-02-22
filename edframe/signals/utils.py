@@ -62,3 +62,35 @@ def sync_recordings(
         warnings.warn(f'{dn} outliers were omitted.')
 
     return sync_recordings
+
+
+def align_signatures(
+    signatures,
+    extrapolate_if_short=True,
+    split_if_long=True,
+    progress_bar=True,
+):
+    asignatures = []
+    n_samples = [vi.n_samples for vi in signatures]
+    n_samples = int(np.median(n_samples))
+
+    for vi in tqdm(signatures, disable=not progress_bar):
+        k = len(vi) // n_samples
+
+        if k > 1 and split_if_long:
+            for j in range(k - 1):
+                a, b = j * n_samples, (j + 1) * n_samples
+                vij = vi[a:b]
+
+                if j == k - 1:
+                    vij = vi[(j + 1) * n_samples:]
+
+                    if len(vij) != n_samples and extrapolate_if_short:
+                        vij = vij.extrapolate(n_samples - len(vij))
+
+                asignatures.append(vij)
+
+        if k == 0 and extrapolate_if_short:
+            vi = vi.extrapolate(n_samples - len(vi))
+
+    return asignatures
