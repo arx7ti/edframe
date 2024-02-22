@@ -17,6 +17,8 @@ class PLAID(Reader):
         dirpath: str,
         metadata: dict | str,
         f0_decimals=2,
+        # TODO
+        # n_jobs=0,
     ):
         self._dirpath = dirpath
 
@@ -63,11 +65,11 @@ class PLAID(Reader):
 
             # Read the meta information about an appliance/appliances
             if 'appliance' in metadata:
-                apps_data = [metadata['appliance']]
+                appliances = self.default_label(metadata['appliance']['type'])
+                locs = None
             elif 'appliances' in metadata:
-                apps_data = metadata['appliances']
+                appliances, locs = self._parse_agg_data(metadata, len(i))
 
-            appliances, locs = self._parse_appliances(apps_data, len(i))
             recordings.append((v, i, fs, f0, appliances, locs))
 
         if item:
@@ -75,13 +77,15 @@ class PLAID(Reader):
 
         return recordings
 
-    def _parse_appliances(self, apps_data, n_samples: int = None):
+    def _parse_agg_data(self, apps_data, n_samples):
         appliances = []
         locs = []
 
         for app_data in apps_data:
-            labels, app_locs = self._parse_appliance(app_data, n_samples)
-            appliances.extend(labels)
+            app_label = self.default_label(app_data['type'])
+            app_locs = self._parse_locs(app_data, n_samples)
+
+            appliances.extend([app_label] * len(app_locs))
             locs.extend(app_locs)
 
         if len(appliances) > 1:
@@ -92,31 +96,22 @@ class PLAID(Reader):
 
         return appliances, locs
 
-    def _parse_appliance(self, app_data, n_samples=None):
-        app_label = self.default_label(app_data['type'])
+    def _parse_locs(self, app_data, n_samples):
+        parse_fn = lambda x: re.findall("\d+", x)
+        locs_on = list(map(int, parse_fn(app_data["on"])))
+        locs_off = list(map(int, parse_fn(app_data["off"])))
+        dn = len(locs_on) - len(locs_off)
 
-        if app_data.get('on') and app_data.get('off'):
-            assert n_samples is not None
+        assert dn >= 0
 
-            parse_fn = lambda x: re.findall("\d+", x)
-            locs_on = list(map(int, parse_fn(app_data["on"])))
-            locs_off = list(map(int, parse_fn(app_data["off"])))
-            dn = len(locs_on) - len(locs_off)
+        if dn > 0:
+            locs_off.extend([n_samples] * dn)
 
-            assert dn >= 0
+        assert len(locs_on) == len(locs_off)
 
-            if dn > 0:
-                locs_off.extend([n_samples] * dn)
+        locs = list(zip(locs_on, locs_off))
 
-            assert len(locs_on) == len(locs_off)
-
-            locs = list(zip(locs_on, locs_off))
-        else:
-            locs = [None]
-
-        labels = [app_label] * len(locs)
-
-        return labels, locs
+        return locs
 
     def default_label(self, label: str) -> str:
         """
