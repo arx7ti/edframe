@@ -20,3 +20,11 @@ class SamplingRateMismatch(Exception):
 
 class MainsFrequencyMismatch(Exception):
     pass
+
+
+class OutliersDetected(Exception):
+    pass
+
+
+class NotFittedError(Exception):
+    pass

@@ -1,19 +1,13 @@
 from __future__ import annotations
 
+import math
 import numpy as np
+
 from numba import njit
 from typing import Optional
 from scipy.signal import butter, filtfilt
 
-from edframe.utils.exceptions import NotEnoughCycles
-
-
-class FITPSNotCalledError(Exception):
-    pass
-
-
-class FITPSCallingError(Exception):
-    pass
+from edframe.utils.exceptions import NotEnoughCycles, OutliersDetected, NotFittedError
 
 
 class FITPS:
@@ -21,123 +15,133 @@ class FITPS:
     Frequency Invariant Transformation of Periodic Signals.
     """
 
-    def __init__(self) -> None:
-        self._zero_crossings = None
+    def __init__(
+        self,
+        window_size=1,
+        outlier_thresh=0.1,
+        zero_thresh=1e-4,
+    ) -> None:
+        assert window_size > 0
+
+        self._ws = window_size
+        self._outlier_thresh = outlier_thresh
+        self._zero_thresh = zero_thresh
+
+        self._x0 = None
+        self._Tm = None
+        self._dx = None
+        self._xf = None
 
     @property
     def zero_crossings(self):
-        return self._zero_crossings
+        self._check_fit()
 
-    def __call__(
-        self,
-        v,
-        i,
-        locs=None,
-        fs=None,
-        f0=None,
-    ) -> tuple[np.ndarray, ...]:
+        return self._x0
 
-        v0 = self._compute_roots(v)
-        self._zero_crossings = v0
+    def fit(self, x):
+        # TODO with and without filtering
+        x0, xf = self._find_roots(x, self._ws, self._zero_thresh)
 
-        if len(v0) < 2:
+        if len(x0) < 2:
             raise NotEnoughCycles
 
-        dv = self._compute_shifts(v, v0)
+        # Find outliers by cycle size
+        T = np.diff(x0)
+        Tm = np.median(T)
+        T = T / np.median(T)
+        outliers = T < min(0, 1 - self._outlier_thresh)
+        outliers |= T > 1 + self._outlier_thresh
 
-        if f0 is not None and fs is not None:
-            ns = round(fs / f0)
-        else:
-            dv0 = np.diff(v0)
-            ns = round(np.mean(dv0))
+        if outliers.any():
+            raise OutliersDetected
 
-        v = self._allocate(v, v0, dv, ns)
-        i = self._allocate(i, v0, dv, ns)
+        dx = self._compute_shifts(xf, x0)
+
+        if dx is None:
+            raise OutliersDetected
+
+        self._x0 = x0
+        self._Tm = Tm
+        self._dx = dx
+        self._xf = xf
+
+        return
+
+    def transform(self, x, cycle_size=None, locs=None):
+        self._check_fit()
+
+        cycle_size = self._Tm if cycle_size is None else cycle_size
+        x = self._allocate(x, self._x0, self._dx, cycle_size)
 
         if locs is not None and None not in locs:
             if not isinstance(locs, np.ndarray):
                 locs = np.asarray(locs)
 
-            locs -= v0[0]
-            locs[locs >= v0[-1]] = np.product(v.shape)
+            locs -= self._x0[0]
+            locs[locs >= self._x0[-1]] = np.product(x.shape)
             locs = np.clip(locs, a_min=0, a_max=None)
 
-            return v, i, locs
-        else:
-            return v, i
+            return x, locs
 
-    # @staticmethod
-    # def _transform_locs(locs, v0):
-    # shape = locs.shape
-
-    # if len(shape) == 2:
-    #     locs = locs.ravel()
-    # elif len(shape) != 1:
-    #     raise ValueError
-
-    # ord = np.argsort(locs)
-
-    # j = 0
-    # plocs_sorted = []
-    # n_periods = len(v0) - 2
-    # for loc in locs[ord]:
-    #     if loc < v0[0]:
-    #         plocs_sorted.append(np.NINF)
-    #     elif loc > v0[-2]:
-    #         plocs_sorted.append(np.Inf)
-    #     else:
-    #         for k in range(j, n_periods):
-    #             if (loc >= v0[k]) & (loc < v0[k + 1]):
-    #                 plocs_sorted.append(k)
-    #                 j = k
-    #                 break
-
-    # assert len(plocs_sorted) == len(locs)
-
-    # plocs = np.empty(len(ord), dtype=float)
-    # for i, j in enumerate(ord):
-    #     plocs[j] = plocs_sorted[i]
-
-    # # Calibration
-    # if len(shape) == 2:
-    #     plocs = plocs.reshape(*shape)
-    #     q1 = (plocs[:, 0] == np.NINF) & (plocs[:, 1] == np.NINF)
-    #     q2 = (plocs[:, 0] == np.Inf) & (plocs[:, 1] == np.Inf)
-    #     q3 = (plocs[:, 0] == np.NINF) & (plocs[:, 1] != np.NINF)
-    #     q4 = (plocs[:, 0] != np.Inf) & (plocs[:, 1] == np.Inf)
-    #     plocs[q1 | q2] = -1
-    #     plocs[q3, 0] = 0
-    #     plocs[q4, 1] = n_periods - 1
-
-    # plocs = plocs.astype(int)
-
-    # return plocs
-
-    # def _filter_v(self, v: np.ndarray) -> np.ndarray:
-    #     f1, f2 = butter(self._n, self._cf)
-    #     v = filtfilt(f1, f2, v).astype(v.dtype)
-    #     return v
+        return x
 
     @staticmethod
     @njit
-    def _compute_roots(v: np.ndarray) -> np.ndarray:
-        v0 = np.empty(0, dtype=np.int32)
+    def _find_roots(
+        x: np.ndarray,
+        window_size: int,
+        zero_thresh: float,
+    ) -> np.ndarray:
+        # Padding signal before computing running mean
+        padding = np.zeros(window_size, dtype=np.int32)
+        left, right = padding[:window_size // 2], padding[window_size // 2:]
+        x = np.concatenate((left, x, right))
 
-        for j in np.arange(len(v) - 1, dtype=np.int32):
-            if (v[j] < v.dtype.type(0.0)) & (v[j + 1] >= v.dtype.type(0.0)):
-                v0 = np.append(v0, j)
-            else:
-                continue
-        return v0
+        # Defining buffer for roots and running window
+        xf = []
+        x0 = []
+        w = np.empty((2, window_size), dtype=np.float32)
+
+        for j in np.arange(1, len(x), dtype=np.int32):
+            # Windowindow_size at the current time and the next
+            w[0, j % window_size], w[1, j % window_size] = x[j - 1], x[j]
+
+            if j >= window_size:
+                x1 = w[0].mean()
+                x1 = abs(x1) if abs(x1) < zero_thresh else x1
+
+                xf.append(x1)
+
+            if j > window_size:
+                x2 = w[1].mean()
+                x2 = abs(x2) if abs(x2) < zero_thresh else x2
+
+                s1 = math.copysign(1, x1) < 0
+                s2 = math.copysign(1, x2) > 0
+
+                if s1 & s2:
+                    x0.append(j - window_size)
+
+        x0 = np.asarray(x0)
+        xf = np.asarray(xf)
+
+        return x0, xf
 
     @staticmethod
     @njit
-    def _compute_shifts(v: np.ndarray, v0: np.ndarray) -> np.ndarray:
-        dv = np.empty(0, dtype=v.dtype)
+    def _compute_shifts(v, v0):
+        dv = []
 
         for j in np.arange(len(v0) - 1, dtype=np.int32):
             k = v0[j]
-            dv = np.append(dv, -v[k] / (v[k + 1] - v[k]))
+
+            if v[k + 1] == v[k]:
+                return
+            else:
+                dv.append(-v[k] / (v[k + 1] - v[k]))
+
+        dv = np.asarray(dv)
+
         return dv
 
     @staticmethod
@@ -158,9 +162,18 @@ class FITPS:
             dist = length / ns_float
 
             for k in np.arange(ns_int, dtype=np.int32):
-                k1 = v0[j] + dv[j] + dist * vec.dtype.type(k)
+                k1 = v0[j] + dv[j] + dist * k
                 k2 = np.int32(np.floor(k1))
                 k3 = np.int32(np.ceil(k1))
                 mat[j, k] = vec[k2] + (vec[k3] - vec[k2]) * dv[j]
 
         return mat
+
+    def _check_fit(self):
+        fit_condition = self._x0 is not None
+        fit_condition = self._Tm is not None
+        fit_condition |= self._dx is not None
+        fit_condition |= self._xf is not None
+
+        if not fit_condition:
+            raise NotFittedError
