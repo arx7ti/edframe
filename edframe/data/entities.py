@@ -504,13 +504,19 @@ class VI(Recording, BackupMixin):
 
         assert not np.may_share_memory(data, self.data)
 
+        v, i = data
         xa, xb = self.locs.T
         drop = np.argwhere((a0 >= xb) | (b0 <= xa)).ravel()
-        v, i, appliances, xa, xb = self._drop_components(
-            drop, *data, self.appliances, xa, xb)
 
-        if v is None:
-            return self.empty()
+        if data.shape[1] != len(self.appliances) and v.shape[0] == 1:
+            appliances, xa, xb = self._drop_components(drop, self.appliances,
+                                                       xa, xb)
+        else:
+            v, i, appliances, xa, xb = self._drop_components(
+                drop, v, i, self.appliances, xa, xb)
+
+            if v is None:
+                return self.empty()
 
         locs = np.stack((xa, xb)).T
         locs = np.clip(locs - a, a_min=da, a_max=data.shape[-1] - db)
@@ -550,6 +556,7 @@ class VI(Recording, BackupMixin):
         if not hasattr(ids, '__len__'):
             ids = [ids]
 
+        # FIXME if n_components == 1 but n_appliances > 1
         v, i, appliances = self._drop_components(ids, *self.data,
                                                  self.appliances)
 
@@ -643,7 +650,8 @@ class VI(Recording, BackupMixin):
         assert v.shape[-1] % Tn == 0
 
         if self.has_locs():
-            locs = self.locs * fs / self.fs
+            k = v.shape[-1] / self.dims[-1]
+            locs = k * self.locs
             locs[:, 0], locs[:, 1] = np.floor(locs[:, 0]), np.ceil(locs[:, 1])
             locs = locs.astype(int)
             locs = np.clip(locs, a_min=0, a_max=v.shape[-1])
@@ -691,6 +699,7 @@ class VI(Recording, BackupMixin):
         appliances = self.appliances
         locs = np.clip(self.locs + n[:, None], a_min=0, a_max=self.n_samples)
         drop = np.argwhere(locs[:, 0] > self.n_samples).ravel()
+        # FIXME if n_components == 1 but n_appliances > 1
         v, i, appliances, locs = self._drop_components(drop, *data, appliances,
                                                        locs)
 
