@@ -51,8 +51,12 @@ def sync_recordings(
             continue
         else:
             T = math.ceil(fs / f0_ref)
-            v = fitps.transform(v, cycle_size=T, locs=locs)
+            v = fitps.transform(v, cycle_size=T)
             i = fitps.transform(i, cycle_size=T, locs=locs)
+
+            if isinstance(i, tuple):
+                i, locs = i
+
             v, i = v.ravel(), i.ravel()
             sync_recordings.append((v, i, fs, f0_ref, appliances, locs))
 

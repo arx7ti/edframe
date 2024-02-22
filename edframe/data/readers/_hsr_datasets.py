@@ -68,7 +68,8 @@ class PLAID(Reader):
                 appliances = self.default_label(metadata['appliance']['type'])
                 locs = None
             elif 'appliances' in metadata:
-                appliances, locs = self._parse_agg_data(metadata, len(i))
+                appliances, locs = self._parse_agg_data(
+                    metadata['appliances'], len(i))
 
             recordings.append((v, i, fs, f0, appliances, locs))
 
