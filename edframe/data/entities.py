@@ -725,6 +725,9 @@ class VI(Recording, BackupMixin):
         return a, b
 
     def extrapolate(self, n):
+        if n < 0:
+            raise ValueError
+
         V, I = [], []
         n = self._adjust_delta(n)
 
@@ -1126,7 +1129,11 @@ class VISet(DataSet, BackupMixin):
 
         return cls(data, safe_mode=safe_mode)
 
-    def __init__(self, signatures: list[VI], safe_mode=True):
+    def __init__(
+        self,
+        signatures: list[VI],
+        safe_mode=True,
+    ):
         n_samples = [vi.n_samples for vi in signatures]
         fs = [vi.fs for vi in signatures]
         f0 = [vi.f0 for vi in signatures]
