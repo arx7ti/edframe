@@ -35,6 +35,7 @@ def sync_recordings(
     outlier_thresh=0.1,
     zero_thresh=1e-4,
     f0_ref=None,
+    progress_bar=True,
 ):
     fitps = FITPS(window_size=window_size,
                   outlier_thresh=outlier_thresh,
@@ -44,7 +45,9 @@ def sync_recordings(
     if f0_ref is None:
         f0_ref = nearest_f0(recordings)
 
-    for v, i, fs, _, appliances, locs in tqdm(recordings):
+    for rec in tqdm(recordings, disable=not progress_bar):
+        v, i, fs, _, appliances, locs = rec
+
         try:
             fitps.fit(v)
         except OutliersDetected:
