@@ -44,6 +44,17 @@ class Recording:
         return self.data.shape[1]
 
     @property
+    def n_orthogonals(self):
+        if self.is_empty():
+            return 0
+
+        return self.data.shape[2]
+
+    @property
+    def n_samples(self):
+        return self.data.shape[3]
+
+    @property
     def feature_names(self):
         features = sorted([
             k for k, v in self.__class__.__dict__.items()
@@ -238,17 +249,6 @@ class VI(Recording, BackupMixin):
     @property
     def n_types(self):
         return list(set(self.appliances))
-
-    @property
-    def n_orthogonals(self):
-        if self.is_empty():
-            return 0
-
-        return self.data.shape[2]
-
-    @property
-    def n_samples(self):
-        return self.data.shape[3]
 
     @property
     def cycle_size(self):
@@ -1043,10 +1043,40 @@ class VIEmpty(VI):
 class P(L):
     __recording_type__ = 'low_sampling_rate'
 
-    def __init__(self, p, fs) -> None:
-        super().__init__(p, fs)
+    @property
+    def values(self):
+        '''
+        Source signal used for features calculation
+        '''
+
+        return self.p
+
+    @staticmethod
+    def __paggrule__(p, keepdims=False):
+        return p.sum((0, 1), keepdims=keepdims)
+
+    @property
+    def p(self):
+        return self.data[0].ravel()
+
+    def __init__(
+        self,
+        p,
+        fs,
+        appliances=None,
+        locs=None,
+        **kwargs,
+    ) -> None:
+        data = p[None, None, None]
+        super().__init__(data, fs, appliances=appliances, locs=locs)
+
+    def isnan(self):
+        return np.isnan(self.p).any()
 
     def resample(self, fs):
+        raise NotImplementedError
+
+    def fillna(self):
         raise NotImplementedError
 
 
