@@ -129,3 +129,82 @@ class DerivativeBasedDetector(WindowBasedDetector):
         locs = np.clip(locs, a_min=0, a_max=entity.n_samples)
 
         return locs
+
+
+class LLRDetector(WindowBasedDetector):
+    '''
+    Appliance event detection based on the log likelihood ratio test (Völker et al.)
+    This class relies on the code implementation proposed by @voelkerb.
+    '''
+    __supported_recordings__ = ['low_sampling_rate']
+
+    def __init__(
+        self,
+        window_size=20,
+        thresh=5,
+        patience=0,
+        std_clip=0.01,
+        linear_factor=0.005,
+    ) -> None:
+        self._window_size = window_size
+        self._thresh = thresh
+        self._patience = patience
+        self._std_clip = std_clip
+        self._linear_factor = linear_factor
+
+    def _sliding_window_view(self, x):
+        x = np.pad(x, (self._window_size - 1, 0))
+        x = np.lib.stride_tricks.sliding_window_view(x, self._window_size)
+
+        return x
+
+    def _compute_likelihoods(self, x):
+        mu_pre = self._sliding_window_view(x).mean(1)
+        mu_post = self._sliding_window_view(x).mean(1)
+        std_pre = self._sliding_window_view(x).std(1)
+        std_post = self._sliding_window_view(x).std(1)
+
+        std_pre = np.clip(std_pre, a_min=self._std_clip, a_max=None)
+        std_post = np.clip(std_post, a_min=self._std_clip, a_max=None)
+
+        likelihoods = np.zeros_like(x)
+
+        for i in range(self._window_size, len(x) - self._window_size):
+            j = i + self._window_size
+            thresh = self._thresh + mu_pre[i] * self._linear_factor
+
+            if abs(mu_post[j] - mu_pre[i]) > thresh:
+                likelihood = np.log(std_pre[i] / std_post[j])
+                likelihood += (x[i] - mu_pre[i])**2 / (2 * std_pre[i]**2)
+                likelihood -= (x[i] - mu_post[j])**2 / (2 * std_post[j]**2)
+                likelihoods[i] = likelihood
+
+        return likelihoods
+
+    def _get_change_points(self, likelihoods):
+        x0 = []
+        alikelihoods = abs(likelihoods)
+        ids = (alikelihoods > 0).nonzero()[0]
+
+        if len(ids) > 0:
+            k = 0
+            ids = np.split(ids, (np.diff(ids) != 1).nonzero()[0] + 1)
+
+            for ids_group in ids:
+                if ids_group[0] < k:
+                    continue
+
+                i = np.argmax(alikelihoods[ids_group]) + ids_group[0]
+                k = i + self._patience
+                x0.append(i)
+
+        x0 = np.asarray(x0)
+
+        return x0
+
+    def transform(self, entity):
+        x = entity.values
+        l = self._compute_likelihoods(x)
+        x0 = self._get_change_points(l)
+
+        return x0
