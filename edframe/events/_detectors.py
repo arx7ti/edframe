@@ -34,6 +34,12 @@ class WindowBasedDetector(EventDetector):
     def __call__(self, entity):
         return self.oncall(entity)
 
+    def _sliding_window_view(self, x):
+        x = np.pad(x, (self._window_size - 1, 0))
+        x = np.lib.stride_tricks.sliding_window_view(x, self._window_size)
+
+        return x
+
     def _striding_window_view(self, x, fill_values=0):
         axes = x.shape[:-1]
         rem = x.shape[-1] % self._window_size
@@ -41,6 +47,7 @@ class WindowBasedDetector(EventDetector):
         if rem > 0:
             # Padding with zeros
             n_pad = self._window_size - rem
+            # TODO rewrite
             x_pad = fill_values * np.ones((*axes, n_pad), dtype=x.dtype)
             x = np.concatenate((x, x_pad), axis=-1)
 
@@ -133,8 +140,7 @@ class DerivativeBasedDetector(WindowBasedDetector):
 
 class LLRDetector(WindowBasedDetector):
     '''
-    Appliance event detection based on the log likelihood ratio test (Völker et al.)
-    This class relies on the code implementation proposed by @voelkerb.
+    Appliance event detector based on the log likelihood estimation. 
     '''
     __supported_recordings__ = ['low_sampling_rate']
 
@@ -143,60 +149,99 @@ class LLRDetector(WindowBasedDetector):
         window_size=20,
         thresh=5,
         patience=0,
-        std_clip=0.01,
+        var_clip=1e-4,
         linear_factor=0.005,
+        likelihood='Volker',
+        precision=20,
     ) -> None:
+        '''
+        likelihood: 'Volker', 'Pereira'
+        '''
         self._window_size = window_size
         self._thresh = thresh
         self._patience = patience
-        self._std_clip = std_clip
+        self._var_clip = var_clip
         self._linear_factor = linear_factor
+        self._likelihood = likelihood
+        self._precision = precision
 
-    def _sliding_window_view(self, x):
-        x = np.pad(x, (self._window_size - 1, 0))
-        x = np.lib.stride_tricks.sliding_window_view(x, self._window_size)
+    def _volker_likelihood(self, xj, mi, mj, vi, vj):
+        thresh = self._thresh + mi * self._linear_factor
 
-        return x
+        if abs(mj - mi) > thresh:
+            likelihood = 0.5 * np.log(vi / vj)
+            likelihood += (xj - mi)**2 / (2 * vi)
+            likelihood -= (xj - mj)**2 / (2 * vj)
+
+            return likelihood
+
+        return 0
+
+    def _pereira_likelihood(self, xj, mi, mj, v):
+        if abs(mj - mi) > self._thresh:
+            likelihood = (mj - mi) / v * abs(xj - 0.5 * (mj + mi))
+
+            return likelihood
+
+        return 0
 
     def _compute_likelihoods(self, x):
-        mu_pre = self._sliding_window_view(x).mean(1)
-        mu_post = self._sliding_window_view(x).mean(1)
-        std_pre = self._sliding_window_view(x).std(1)
-        std_post = self._sliding_window_view(x).std(1)
-
-        std_pre = np.clip(std_pre, a_min=self._std_clip, a_max=None)
-        std_post = np.clip(std_post, a_min=self._std_clip, a_max=None)
-
         likelihoods = np.zeros_like(x)
+        x = np.pad(x, (self._window_size - 1, 0))
 
-        for i in range(self._window_size, len(x) - self._window_size):
+        for i in range(self._window_size, len(x) - 2 * self._window_size + 1):
+            # Detection window
             j = i + self._window_size
-            thresh = self._thresh + mu_pre[i] * self._linear_factor
+            xij = x[i:j + self._window_size]
 
-            if abs(mu_post[j] - mu_pre[i]) > thresh:
-                likelihood = np.log(std_pre[i] / std_post[j])
-                likelihood += (x[i] - mu_pre[i])**2 / (2 * std_pre[i]**2)
-                likelihood -= (x[i] - mu_post[j])**2 / (2 * std_post[j]**2)
-                likelihoods[i] = likelihood
+            # Pre-event window
+            xi = xij[:self._window_size]
+            mi = xi.mean()
+
+            # Post-event window
+            xj = xij[self._window_size:]
+            mj = xj.mean()
+
+            assert len(xi) == len(xj)
+
+            # Change point
+            x0 = xj[0]
+
+            if self._likelihood == 'Volker':
+                vi = np.clip(xi.std(), a_min=self._var_clip, a_max=None)
+                vj = np.clip(xj.std(), a_min=self._var_clip, a_max=None)
+                likelihood = self._volker_likelihood(x0, mi, mj, vi, vj)
+            elif self._likelihood == 'Pereira':
+                v = xij.var()
+                likelihood = self._pereira_likelihood(x0, mi, mj, v)
+            else:
+                raise ValueError
+
+            likelihoods[i] = likelihood
 
         return likelihoods
 
     def _get_change_points(self, likelihoods):
+        k = 0
         x0 = []
-        alikelihoods = abs(likelihoods)
-        ids = (alikelihoods > 0).nonzero()[0]
+        ws = 2 * self._precision + 1
 
-        if len(ids) > 0:
-            k = 0
-            ids = np.split(ids, (np.diff(ids) != 1).nonzero()[0] + 1)
+        for i in range(len(likelihoods) - ws):
+            # Mid point of activation window
+            m = i + ws // 2
 
-            for ids_group in ids:
-                if ids_group[0] < k:
-                    continue
+            if m - k < self._patience:
+                continue
 
-                i = np.argmax(alikelihoods[ids_group]) + ids_group[0]
-                k = i + self._patience
-                x0.append(i)
+            lm = likelihoods[m]
+
+            # Activation window
+            vw = likelihoods[i:i + ws]
+            vw = np.delete(vw, len(vw) // 2)
+
+            if lm > vw.max() or lm < vw.min():
+                x0.append(m)
+                k = m
 
         x0 = np.asarray(x0)
 
@@ -204,7 +249,7 @@ class LLRDetector(WindowBasedDetector):
 
     def transform(self, entity):
         x = entity.values
-        l = self._compute_likelihoods(x)
-        x0 = self._get_change_points(l)
+        x = self._compute_likelihoods(x)
+        x0 = self._get_change_points(x)
 
         return x0
