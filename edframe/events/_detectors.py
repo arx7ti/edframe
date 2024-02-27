@@ -187,6 +187,7 @@ class DualWindowDetector(WindowBasedDetector):
         vote_thresh=10,
         score_thresh=0.01,
         score_thresh_type='rel',
+        log_scoring=True,
         **kwargs,
     ) -> None:
         '''
@@ -203,6 +204,7 @@ class DualWindowDetector(WindowBasedDetector):
         self._vote_thresh = vote_thresh
         self._score_thresh = score_thresh
         self._score_thresh_type = score_thresh_type
+        self._log_scoring = log_scoring
         self._var_clip = kwargs.get('var_clip', 1e-12)
         self._linear_factor = kwargs.get('linear_factor', 0.005)
         self._power_clip = kwargs.get('power_clip', 1e-12)
@@ -266,6 +268,9 @@ class DualWindowDetector(WindowBasedDetector):
                 raise ValueError
 
             scores[i] = score
+
+            if self._log_scoring:
+                scores[i] = np.log(1 + scores[i])
 
         return scores
 
