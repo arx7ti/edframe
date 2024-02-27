@@ -72,7 +72,7 @@ class WindowBasedDetector(EventDetector):
         return x
 
     def _get_change_points(self, scores):
-        window_size = self._voting_window_size 
+        window_size = self._voting_window_size
         patience = self._patience
         vote_thresh = self._vote_thresh
         score_thresh = self._score_thresh
@@ -171,9 +171,9 @@ class DerivativeBasedDetector(WindowBasedDetector):
         return locs
 
 
-class LLRDetector(WindowBasedDetector):
+class DualWindowDetector(WindowBasedDetector):
     '''
-    Appliance event detector based on the log likelihood estimation. 
+    Appliance event detector based on the pre- and post-event windows. 
     '''
     __supported_recordings__ = ['low_sampling_rate']
 
@@ -181,29 +181,31 @@ class LLRDetector(WindowBasedDetector):
         self,
         window_size=20,
         power_thresh=5,
-        likelihood='Volker',
+        scoring='Volker_likelihood',
         voting_window_size=20,
         patience=0,
         vote_thresh=10,
-        likelihood_thresh=0.01,
-        likelihood_thresh_type='rel',
+        score_thresh=0.01,
+        score_thresh_type='rel',
         **kwargs,
     ) -> None:
         '''
-        likelihood: 'Volker', 'Pereira'
+        scoring: 'Volker_likelihood', 'Pereira_likelihood', 'Jin_GOF'
+        power_thresh: ignored if scoring='Jin_GOF'
         '''
-        self._check_thresh_type(likelihood_thresh_type)
+        self._check_thresh_type(score_thresh_type)
 
         self._window_size = window_size
         self._power_thresh = power_thresh
-        self._linear_factor = kwargs.get('linear_factor', 0.005)
-        self._likelihood = likelihood
+        self._scoring = scoring
         self._voting_window_size = voting_window_size
         self._patience = patience
         self._vote_thresh = vote_thresh
-        self._score_thresh = likelihood_thresh
-        self._score_thresh_type = likelihood_thresh_type
+        self._score_thresh = score_thresh
+        self._score_thresh_type = score_thresh_type
         self._var_clip = kwargs.get('var_clip', 1e-12)
+        self._linear_factor = kwargs.get('linear_factor', 0.005)
+        self._power_clip = kwargs.get('power_clip', 1e-12)
 
     def _volker_likelihood(self, xj, mi, mj, vi, vj):
         thresh = self._power_thresh + mi * self._linear_factor
@@ -213,7 +215,7 @@ class LLRDetector(WindowBasedDetector):
             likelihood += (xj - mi)**2 / (2 * vi)
             likelihood -= (xj - mj)**2 / (2 * vj)
 
-            return likelihood
+            return abs(likelihood)
 
         return 0
 
@@ -221,86 +223,22 @@ class LLRDetector(WindowBasedDetector):
         if abs(mj - mi) > self._power_thresh:
             likelihood = (mj - mi) / v * abs(xj - 0.5 * (mj + mi))
 
-            return likelihood
+            return abs(likelihood)
 
         return 0
 
-    def _compute_likelihoods(self, x):
+    def _jin_gof_score(self, q, p):
+        gof_score = ((q - p)**2 / p).sum()
+
+        return gof_score
+
+    def _compute_scores(self, x):
         var_clip = self._var_clip
-        window_size = self._window_size
-
-        likelihoods = np.zeros_like(x)
-        x = np.pad(x, (window_size - 1, window_size))
-
-        for i in range(len(x) - 2 * window_size + 1):
-            j = i + window_size
-            dw = x[i:j + window_size]  # Detection window
-            p = dw[:window_size]  # Pre-event window
-            q = dw[window_size:]  # Post-event window
-
-            assert len(p) == len(q) == window_size
-
-            x0 = q[0]  # Change point
-            mp = p.mean()
-            mq = q.mean()
-
-            assert len(p) == len(p)
-
-            if self._likelihood == 'Volker':
-                vp = np.clip(p.var(), a_min=var_clip, a_max=None)
-                vq = np.clip(q.var(), a_min=var_clip, a_max=None)
-                likelihood = self._volker_likelihood(x0, mp, mq, vp, vq)
-            elif self._likelihood == 'Pereira':
-                v = np.clip(dw.var(), a_min=var_clip, a_max=None)
-                likelihood = self._pereira_likelihood(x0, mp, mq, v)
-            else:
-                raise ValueError
-
-            likelihoods[i] = likelihood
-
-        return likelihoods
-
-    def transform(self, entity):
-        x = entity.values
-        x = self._compute_likelihoods(x)
-        x0 = self._get_change_points(abs(x))
-
-        return x0, x
-
-
-class GOFDetector(WindowBasedDetector):
-    '''
-    Appliance event detector based on the "goodness of fit". 
-    '''
-    __supported_recordings__ = ['low_sampling_rate']
-
-    def __init__(
-        self,
-        window_size=20,
-        voting_window_size=20,
-        patience=0,
-        vote_thresh=10,
-        gof_thresh=0.01,
-        gof_thresh_type='rel',
-        **kwargs,
-    ) -> None:
-        self._check_thresh_type(gof_thresh_type)
-
-        self._window_size = window_size
-        self._voting_window_size = voting_window_size
-        self._patience = patience
-        self._vote_thresh = vote_thresh
-        self._score_thresh = gof_thresh
-        self._score_thresh_type = gof_thresh_type
-        self._power_clip = kwargs.get('power_clip', 1e-14)
-
-    def _compute_gofs(self, x):
         power_clip = self._power_clip
         window_size = self._window_size
 
-        gofs = np.zeros_like(x)
+        scores = np.zeros_like(x)
         x = np.pad(x, (window_size - 1, window_size))
-        x = np.clip(x, a_min=power_clip, a_max=None)
 
         for i in range(len(x) - 2 * window_size + 1):
             j = i + window_size
@@ -310,13 +248,30 @@ class GOFDetector(WindowBasedDetector):
 
             assert len(p) == len(q) == window_size
 
-            gofs[i] = ((q - p)**2 / p).sum()
+            if self._scoring in ['Volker_likelihood', 'Pereira_likelihood']:
+                x0, mp, mq = q[0], p.mean(), q.mean()
 
-        return gofs
+            if self._scoring == 'Volker_likelihood':
+                vp = np.clip(p.var(), a_min=var_clip, a_max=None)
+                vq = np.clip(q.var(), a_min=var_clip, a_max=None)
+                score = self._volker_likelihood(x0, mp, mq, vp, vq)
+            elif self._scoring == 'Pereira_likelihood':
+                v = np.clip(dw.var(), a_min=var_clip, a_max=None)
+                score = self._pereira_likelihood(x0, mp, mq, v)
+            elif self._scoring == 'Jin_GOF':
+                p = np.clip(p, a_min=power_clip, a_max=None)
+                q = np.clip(q, a_min=power_clip, a_max=None)
+                score = self._jin_gof_score(q, p)
+            else:
+                raise ValueError
+
+            scores[i] = score
+
+        return scores
 
     def transform(self, entity):
         x = entity.values
-        x = self._compute_gofs(x)
+        x = self._compute_scores(x)
         x0 = self._get_change_points(x)
 
-        return x0, x
+        return x0
