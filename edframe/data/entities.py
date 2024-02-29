@@ -1060,15 +1060,54 @@ class P(L):
     def p(self):
         return self.data[0].ravel()
 
+    @feature
+    def power_hours(self, mode='mean'):
+        if not self.has_timeline():
+            raise AttributeError
+
+        p = self.p
+        bars = np.zeros(24)
+        hours = self._timeline.hour
+
+        for hour in range(24):
+            mask = hours == hour
+
+            if mask.any():
+                ph = p[mask]
+
+                if mode == 'min':
+                    bars[hour] = ph.min()
+                elif mode == 'mean':
+                    bars[hour] = ph.mean()
+                elif mode == 'median':
+                    bars[hour] = np.median(ph) 
+                elif mode == 'max':
+                    bars[hour] = ph.max()
+                elif mode == 'sum':
+                    bars[hour] = ph.sum()
+                else:
+                    raise ValueError
+
+        return bars
+
+    @feature
+    def interevent_time(self):
+        raise NotImplementedError
+
+    def has_timeline(self):
+        return self._timeline is not None
+
     def __init__(
         self,
         p,
         fs,
+        timeline=None,
         appliances=None,
         locs=None,
         **kwargs,
     ) -> None:
         data = p[None, None, None]
+        self._timeline = timeline
         super().__init__(data, fs, appliances=appliances, locs=locs)
 
     def isnan(self):

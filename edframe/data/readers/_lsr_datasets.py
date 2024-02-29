@@ -95,6 +95,7 @@ class UKDALE(Reader):
                                header=None,
                                index_col=0,
                                names=['p'])
+            timeline = pd.to_datetime(data.index * 10**9, unit='ns')
             p = data['p'].values.astype(float)
 
             appliance = self._labels[channel]
@@ -103,7 +104,7 @@ class UKDALE(Reader):
             on_power = app_data.get('on_power_threshold',
                                     self._default_threshold)
 
-            recordings.append((p, fs, on_power, appliance))
+            recordings.append((p, fs, timeline, on_power, appliance))
 
         if item:
             return recordings[0]
