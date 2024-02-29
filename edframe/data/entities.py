@@ -1075,6 +1075,9 @@ class P(L):
         return np.isnan(self.p).any()
 
     def resample(self, fs, window_size=None):
+        if self.isnan():
+            raise AttributeError 
+
         if window_size is None:
             window_size = fs if fs > self.fs else fs * self.fs
 
