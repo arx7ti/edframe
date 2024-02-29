@@ -10,6 +10,7 @@ import itertools as it
 from copy import deepcopy
 from numbers import Number
 from inspect import isfunction
+from scipy.signal import resample
 from collections import defaultdict
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import MultiLabelBinarizer
@@ -1073,8 +1074,20 @@ class P(L):
     def isnan(self):
         return np.isnan(self.p).any()
 
-    def resample(self, fs):
-        raise NotImplementedError
+    def resample(self, fs, window_size=None):
+        if window_size is None:
+            window_size = fs if fs > self.fs else fs * self.fs
+
+        data = self.data
+        data_min = data.min(-1, keepdims=True)
+        n_samples = math.ceil(self.fs / fs * self.n_samples)
+        data = resample(data, n_samples, axis=-1, window=window_size)
+        data = np.clip(data, a_min=data_min, a_max=None)
+
+        p = data[0]
+
+        # return self.new(p, self.fs, appliances=self.appliances, locs=self.locs)
+        return self.new(p, self.fs)
 
     def fillna(self):
         raise NotImplementedError
