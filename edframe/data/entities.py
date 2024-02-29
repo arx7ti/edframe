@@ -1076,7 +1076,7 @@ class P(L):
 
     def resample(self, fs, window_size=None):
         if self.isnan():
-            raise AttributeError 
+            raise AttributeError
 
         if window_size is None:
             window_size = fs if fs > self.fs else fs * self.fs
@@ -1086,6 +1086,22 @@ class P(L):
         n_samples = math.ceil(self.fs / fs * self.n_samples)
         data = resample(data, n_samples, axis=-1, window=window_size)
         data = np.clip(data, a_min=data_min, a_max=None)
+
+        p = data[0]
+
+        # return self.new(p, self.fs, appliances=self.appliances, locs=self.locs)
+        return self.new(p, self.fs)
+
+    def pad(self, n):
+        if isinstance(n, int):
+            a, b = n // 2, n - n // 2
+        elif isinstance(n, tuple):
+            a, b = n
+        else:
+            raise ValueError
+
+        paddings = [(0, 0), (0, 0), (0, 0), (a, b)]
+        data = np.pad(self.data, paddings)
 
         p = data[0]
 
