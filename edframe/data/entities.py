@@ -1061,32 +1061,41 @@ class P(L):
         return self.data[0].ravel()
 
     @feature
-    def power_hours(self, mode='mean'):
+    def energy_bars(self, scale='hour', fmt='kWh'):
         if not self.has_timeline():
             raise AttributeError
 
-        p = self.p
-        bars = np.zeros(24)
-        hours = self._timeline.hour
+        if scale == 'hour':
+            bars = np.zeros(24)
+            times = self._timeline.hour
+            time_min, time_max = 0, 23
+        elif scale == 'day':
+            bars = np.zeros(31)
+            times = self._timeline.day
+            time_min, time_max = 1, 31
+        elif scale == 'weekday':
+            bars = np.zeros(7)
+            times = self._timeline.weekday
+            time_min, time_max = 1, 7
+        else:
+            raise ValueError
 
-        for hour in range(24):
-            mask = hours == hour
+        p = self.p
+
+        for time in range(time_min, time_max + 1):
+            mask = times == time
 
             if mask.any():
-                ph = p[mask]
+                pt = p[mask]
+                bar = pt.sum()
+                bars[time] = bar
 
-                if mode == 'min':
-                    bars[hour] = ph.min()
-                elif mode == 'mean':
-                    bars[hour] = ph.mean()
-                elif mode == 'median':
-                    bars[hour] = np.median(ph) 
-                elif mode == 'max':
-                    bars[hour] = ph.max()
-                elif mode == 'sum':
-                    bars[hour] = ph.sum()
-                else:
-                    raise ValueError
+        bars = bars * self.fs / 3600
+
+        if fmt == 'kWh':
+            bars = bars / 1000
+        elif fmt != 'Wh':
+            raise ValueError
 
         return bars
 
