@@ -44,7 +44,7 @@ def _distribute_samples(n_samples, n_appliances, n_modes_per_appliance):
     return n_spc, class_for_cluster
 
 
-def make_hf_cycles_from(X, n_samples=100, reg=1e-12):
+def make_hf_cycles_from(X, n_samples=100, reg=1e-10):
     output_size = X.shape[1]
     X = X / np.abs(X).max(1, keepdims=True)
     Z = np.fft.rfft(X, axis=-1)

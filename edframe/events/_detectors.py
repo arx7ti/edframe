@@ -274,8 +274,7 @@ class DualWindowDetector(WindowBasedDetector):
 
         return scores
 
-    def transform(self, entity):
-        x = entity.values
+    def transform(self, x):
         x = self._compute_scores(x)
         x0 = self._get_change_points(x)
 
