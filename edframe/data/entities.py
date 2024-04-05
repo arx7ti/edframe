@@ -207,26 +207,27 @@ class VI(Recording, BackupMixin):
 
     @property
     def vfold(self):
-        return self.v.reshape(self.n_cycles, self.cycle_size)
+        return self.v.reshape(*self.fold_dims)
 
     @property
     def ifold(self):
-        return self.i.reshape(self.n_cycles, self.cycle_size)
+        return self.i.reshape(*self.fold_dims)
 
     @property
     def vcfold(self):
-        return self.vc.reshape(self.n_components, self.n_cycles,
-                               self.cycle_size)
+        return self.vc.reshape(self.n_components, *self.fold_dims)
 
     @property
     def icfold(self):
-        return self.ic.reshape(self.n_components, self.n_cycles,
-                               self.cycle_size)
+        return self.ic.reshape(self.n_components, *self.fold_dims)
 
     @property
-    def sfold(self):
-        return self.sc.reshape(self.n_components, self.n_cycles,
-                               self.cycle_size)
+    def scfold(self):
+        return self.sc.reshape(self.n_components, *self.fold_dims)
+
+    @property
+    def fold_dims(self):
+        return self.n_cycles, self.cycle_size
 
     @property
     def appliances(self):
@@ -466,8 +467,8 @@ class VI(Recording, BackupMixin):
             vhalf = v[..., :T // 2]
             # ihalf = i[..., :T // 2]
 
-            if np.mean(vhalf) < 0:
-                raise ValueError
+            # if np.mean(vhalf) < 0:
+            #     raise ValueError
 
     def __len__(self):
         return self.n_samples
@@ -488,6 +489,7 @@ class VI(Recording, BackupMixin):
         if b0 <= a0:
             raise ValueError
 
+        # TODO let it be
         if a > self.n_samples or b > self.n_samples:
             raise ValueError
 
@@ -617,6 +619,8 @@ class VI(Recording, BackupMixin):
             i = self.__iaggrule__(i, keepdims=True)
             locs = None
 
+        # order = list(sorted(range(len(appliances)), key=appliances.__getitem__))
+
         return self.new(v,
                         i,
                         self.fs,
@@ -663,6 +667,11 @@ class VI(Recording, BackupMixin):
                         self.f0,
                         appliances=self.appliances,
                         locs=locs)
+
+    def convert(self):
+        '''
+        '''
+        raise NotImplementedError
 
     def roll(self, n):
         '''
@@ -840,8 +849,8 @@ class VI(Recording, BackupMixin):
         if cycle_wise:
             raise NotImplementedError
         else:
-            v = self.vc / abs(self.v).max()
-            i = self.ic / abs(self.i).max()
+            v = self.vc / (abs(self.v).max() + 1e-9)
+            i = self.ic / (abs(self.i).max() + 1e-9)
 
         locs = self.locs if self.has_locs() else None
 
@@ -1061,32 +1070,41 @@ class P(L):
         return self.data[0].ravel()
 
     @feature
-    def power_hours(self, mode='mean'):
+    def energy_bars(self, scale='hour', fmt='kWh'):
         if not self.has_timeline():
             raise AttributeError
 
-        p = self.p
-        bars = np.zeros(24)
-        hours = self._timeline.hour
+        if scale == 'hour':
+            bars = np.zeros(24)
+            times = self._timeline.hour
+            time_min, time_max = 0, 23
+        elif scale == 'day':
+            bars = np.zeros(31)
+            times = self._timeline.day
+            time_min, time_max = 1, 31
+        elif scale == 'weekday':
+            bars = np.zeros(7)
+            times = self._timeline.weekday
+            time_min, time_max = 1, 7
+        else:
+            raise ValueError
 
-        for hour in range(24):
-            mask = hours == hour
+        p = self.p
+
+        for time in range(time_min, time_max + 1):
+            mask = times == time
 
             if mask.any():
-                ph = p[mask]
+                pt = p[mask]
+                bar = pt.sum()
+                bars[time] = bar
 
-                if mode == 'min':
-                    bars[hour] = ph.min()
-                elif mode == 'mean':
-                    bars[hour] = ph.mean()
-                elif mode == 'median':
-                    bars[hour] = np.median(ph) 
-                elif mode == 'max':
-                    bars[hour] = ph.max()
-                elif mode == 'sum':
-                    bars[hour] = ph.sum()
-                else:
-                    raise ValueError
+        bars = bars * self.fs / 3600
+
+        if fmt == 'kWh':
+            bars = bars / 1000
+        elif fmt != 'Wh':
+            raise ValueError
 
         return bars
 
@@ -1114,6 +1132,9 @@ class P(L):
         return np.isnan(self.p).any()
 
     def resample(self, fs, window_size=None):
+        if self.has_timeline():
+            raise NotImplementedError
+
         if self.isnan():
             raise AttributeError
 
@@ -1132,6 +1153,9 @@ class P(L):
         return self.new(p, self.fs)
 
     def pad(self, n):
+        if self.has_timeline():
+            raise NotImplementedError
+
         if isinstance(n, int):
             a, b = n // 2, n - n // 2
         elif isinstance(n, tuple):
@@ -1180,6 +1204,12 @@ class VISet(DataSet, BackupMixin):
         return data
 
     @property
+    def values(self):
+        values = np.stack([vi.values for vi in self.signatures])
+
+        return values
+
+    @property
     def labels(self):
         labels = [vi.labels for vi in self.signatures]
 
@@ -1191,7 +1221,7 @@ class VISet(DataSet, BackupMixin):
 
     @property
     def targets(self):
-        mlb = MultiLabelBinarizer()
+        mlb = MultiLabelBinarizer(classes=self.appliance_types)
 
         return mlb.fit_transform(self.labels)
 
