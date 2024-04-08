@@ -241,8 +241,22 @@ class VI(Recording, BackupMixin):
         return [-1]
 
     @property
+    def appliance(self):
+        if self.is_empty():
+            return None
+
+        if self.n_types == 1:
+            return self.appliances[0]
+
+        raise AttributeError
+
+    @property
     def labels(self):
         return self.appliances
+
+    @property
+    def label(self):
+        return self.appliance
 
     @property
     def n_appliances(self):
@@ -250,7 +264,7 @@ class VI(Recording, BackupMixin):
 
     @property
     def n_types(self):
-        return list(set(self.appliances))
+        return len(list(set(self.appliances)))
 
     @property
     def cycle_size(self):
@@ -667,6 +681,43 @@ class VI(Recording, BackupMixin):
                         self.f0,
                         appliances=self.appliances,
                         locs=locs)
+
+    def _subset_of(self):
+        pass
+
+    def split_by_cycles(self):
+        dims = (2, self.n_components, self.n_orthogonals, *self.fold_dims)
+        data_cycles = self.data.reshape(*dims)
+        data_cycles = data_cycles.transpose(3, 0, 1, 2, 4)
+
+        a = 0
+        cycles = []
+
+        for v, i in data_cycles:
+            b = a + v.shape[-1]
+
+            if self.has_locs():
+                ids = ((a >= self.locs[:, 0]) & (b < self.locs[:, 1]))
+                locs = self.locs[ids]
+                print(ids.nonzero()[0], '\n')
+            else:
+                locs = None
+
+            if self.has_locs() and self.has_appliances():
+                appliances = self.appliances[ids]
+            else:
+                appliances = None
+
+            cycle = self.new(v,
+                             i,
+                             self.fs,
+                             self.f0,
+                             appliances=appliances,
+                             locs=locs)
+            cycles.append(cycle)
+            a = b
+
+        return cycles
 
     def convert(self):
         '''
