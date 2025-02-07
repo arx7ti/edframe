@@ -16,10 +16,8 @@ def active_power(v, i):
 def reactive_power(v, i):
     S = np.sqrt(np.power(v * i, 2).mean())
     P = active_power(v, i)
-    return np.sqrt(S**2 - P**2)
-    # i90 = -np.imag(hilbert(i)).astype(i.dtype)
 
-    # return (v * i90).mean()
+    return np.sqrt(S**2 - P**2)
 
 
 def adj16(components, total):

@@ -1,142 +1,197 @@
-from __future__ import annotations
-from collections.abc import Sequence
 from pathlib import Path
 
 import os
-import re
 import json
-import numpy as np
 import pandas as pd
+import numpy as np
+import re
+import logging
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+from .utils import fundamental
 
 
-def fundamental(x, fs):
-    amps = abs(np.fft.rfft(x))
-    freqs = np.fft.rfftfreq(len(x), 1 / fs)
-    f0 = freqs[np.argmax(amps)]
+class PLAID:
+    """PLAID dataset reader."""
+    __f0_decimals__: int = 2  # Number of decimal places for fundamental frequency rounding.
 
-    return f0
+    def __init__(
+        self,
+        dirpath: str | Path,
+        metadata: dict | str | Path,
+    ):
+        """
+        Initializes the dataset reader.
 
+        Args:
+            dirpath (str | Path): Directory path containing the dataset files.
+            metadata (dict | str | Path): Path to metadata file or dictionary containing metadata.
+        """
+        if not os.path.exists(dirpath):
+            raise ValueError(f"Directory {dirpath} does not exist.")
 
-class PLAID(Sequence):
+        self._dirpath = Path(dirpath)
 
-    def __init__(self, dirpath: str, metadata: dict | str, f0_decimals=2):
-        self._dirpath = dirpath
-
-        if isinstance(metadata, str | Path):
-            with open(metadata) as jf:
+        if isinstance(metadata, (str, Path)):
+            with open(metadata, 'r') as jf:
                 metadata = json.load(jf)
         elif not isinstance(metadata, dict):
-            raise ValueError
+            raise ValueError(
+                "Metadata should be a dictionary or a valid file path.")
 
-        self.metadata = list(sorted(metadata.items(), key=lambda x: int(x[0])))
-        self._f0_decimals = f0_decimals
+        # Sort metadata keys numerically
+        self.metadata = sorted(metadata.items(), key=lambda x: int(x[0]))
+        self.devices = sorted(
+            set((self.format_label(x['appliance']['type'])
+                 for _, x in self.metadata)))
 
-    def __len__(self):
+    def __len__(self) -> int:
+        """Returns the number of available recordings."""
+
         return len(self.metadata)
 
-    def __getitem__(self, indexer: slice | int):
-        item = False
+    def __getitem__(self, indexer: slice | int | list[int]):
+        """
+        Retrieves dataset items by index, slice, or list of indices.
 
+        Args:
+            indexer (slice | int | list[int]): Index, slice, or list of indices.
+
+        Returns:
+            A tuple (voltage, current, fs, f0, appliances, locs) or a list of such tuples.
+        """
         if isinstance(indexer, slice):
             iterator = self.metadata[indexer]
         elif isinstance(indexer, list):
             iterator = [self.metadata[idx] for idx in indexer]
         elif isinstance(indexer, int):
             iterator = [self.metadata[indexer]]
-            item = True
         else:
-            raise ValueError
+            raise ValueError(
+                "Invalid index type. Must be int, slice, or list of int.")
 
-        recordings = []
+        recordings = [
+            self._read_data(idx, metadata) for idx, metadata in iterator
+        ]
 
-        for idx, metadata in iterator:
-            fs = metadata['header']['sampling_frequency']
-            fs = int(fs.replace('Hz', ''))
-            filename = f'{idx}.csv'
-            filepath = os.path.join(self._dirpath, filename)
+        return recordings[0] if isinstance(indexer, int) else recordings
 
-            # Read the waveforms
-            waveforms = pd.read_csv(filepath, names=['current', 'voltage'])
-            v = waveforms.voltage.to_numpy()
-            i = waveforms.current.to_numpy()
+    def _read_data(self, idx: str, metadata: dict):
+        """
+        Processes metadata and loads the corresponding dataset.
 
-            # Mains frequency estimation
-            f0 = round(fundamental(v, fs), self._f0_decimals)
+        Args:
+            idx (str): Index of the recording.
+            metadata (dict): Metadata for the recording.
 
-            # Read the meta information about an appliance/appliances
-            if 'appliance' in metadata:
-                appliances = self.default_label(metadata['appliance']['type'])
-                locs = None
-            elif 'appliances' in metadata:
-                appliances, locs = self._parse_agg_data(
-                    metadata['appliances'], len(i))
+        Returns:
+            tuple: (voltage, current, fs, f0, appliances, locs)
+        """
+        fs = int(metadata['header']['sampling_frequency'].replace('Hz', ''))
+        filepath = self._dirpath / f"{idx}.csv"
 
-            recordings.append((v, i, fs, f0, appliances, locs))
+        # Read waveform data
+        waveforms = pd.read_csv(filepath, names=['current', 'voltage'])
+        v, i = waveforms.voltage.to_numpy(), waveforms.current.to_numpy()
 
-        if item:
-            return recordings[0]
+        # Estimate mains frequency
+        f0 = round(fundamental(v, fs), self.__f0_decimals__)
 
-        return recordings
+        # Parse appliance information
+        if 'appliance' in metadata:
+            appliances = self.format_label(metadata['appliance']['type'])
+            locs = None
+        elif 'appliances' in metadata:
+            appliances, locs = self._parse_agg_data(metadata['appliances'],
+                                                    len(i))
+        else:
+            appliances, locs = None, None
 
-    def _parse_agg_data(self, apps_data, n_samples):
-        appliances = []
-        locs = []
+        return v, i, fs, f0, appliances, locs
+
+    def _parse_agg_data(
+        self,
+        apps_data: list[dict],
+        n_samples: int,
+    ) -> tuple[list[str], list[tuple[int, int]]]:
+        """
+        Parses aggregated appliance data.
+
+        Args:
+            apps_data (list[dict]): List of appliance metadata.
+            n_samples (int): Number of samples in the recording.
+
+        Returns:
+            tuple: (appliance names, activation periods)
+        """
+        appliances, locs = [], []
 
         for app_data in apps_data:
-            app_label = self.default_label(app_data['type'])
-            app_locs = self._parse_locs(app_data, n_samples)
+            label = self.format_label(app_data['type'])
+            locations = self._parse_locs(app_data, n_samples)
 
-            appliances.extend([app_label] * len(app_locs))
-            locs.extend(app_locs)
+            appliances.extend([label] * len(locations))
+            locs.extend(locations)
 
+        # Sort appliances and locs based on appliance names
         if len(appliances) > 1:
-            ord = sorted(range(len(appliances)),
-                         key=lambda idx: appliances[idx])
-            appliances = [appliances[idx] for idx in ord]
-            locs = [locs[idx] for idx in ord]
+            sorted_indices = sorted(range(len(appliances)),
+                                    key=lambda i: appliances[i])
+            appliances = [appliances[i] for i in sorted_indices]
+            locs = [locs[i] for i in sorted_indices]
 
         return appliances, locs
 
-    def _parse_locs(self, app_data, n_samples):
-        parse_fn = lambda x: re.findall(r"\d+", x)
-        locs_on = list(map(int, parse_fn(app_data["on"])))
-        locs_off = list(map(int, parse_fn(app_data["off"])))
-        dn = len(locs_on) - len(locs_off)
-
-        assert dn >= 0
-
-        if dn > 0:
-            locs_off.extend([n_samples] * dn)
-
-        assert len(locs_on) == len(locs_off)
-
-        locs = list(zip(locs_on, locs_off))
-
-        return locs
-
-    def default_label(self, label: str) -> str:
+    def _parse_locs(self, app_data: dict,
+                    n_samples: int) -> list[tuple[int, int]]:
         """
-        Format an appliance's label by default
+        Parses activation periods of appliances.
 
-        Arguments:
-            label: str
+        Args:
+            app_data (dict): Appliance data.
+            n_samples (int): Number of samples.
+
         Returns:
-            str
+            list of tuples: Activation (on, off) periods.
         """
-        label = label.lower().replace(' ', '_')
+        extract_ints = lambda x: list(map(int, re.findall(r"\d+", x)))
 
-        return label
+        locs_on = extract_ints(app_data.get("on", ""))
+        locs_off = extract_ints(app_data.get("off", ""))
 
-    def random(self, random_state=None):
-        rng = np.random.RandomState(random_state)
-        idx = rng.randint(len(self))
+        if len(locs_on) > len(locs_off):
+            locs_off.extend([n_samples] * (len(locs_on) - len(locs_off)))
+
+        assert len(locs_on) == len(locs_off), "Mismatched on/off locations"
+
+        return list(zip(locs_on, locs_off))
+
+    def format_label(self, label: str) -> str:
+        """
+        Formats an appliance's label.
+
+        Args:
+            label (str): Original appliance label.
+
+        Returns:
+            str: Standardized appliance label.
+        """
+
+        return label.lower().replace(' ', '_')
+
+    def random(self, random_state: int | None = None):
+        """
+        Returns a random dataset sample.
+
+        Args:
+            random_state (int | None): Random seed for reproducibility.
+
+        Returns:
+            tuple: A single dataset sample.
+        """
+        rng = np.random.default_rng(random_state)
+        idx = rng.integers(len(self))
 
         return self[idx]
-
-    @property
-    def devices(self):
-        return sorted(
-            set([
-                self.default_label(x['appliance']['type'])
-                for _, x in self.metadata
-            ]))

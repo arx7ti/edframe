@@ -1,98 +1,169 @@
-from __future__ import annotations
+from pathlib import Path
 from collections.abc import Sequence
 
 import os
 import numpy as np
-
 import soundfile as sf
+import logging
+import audioread
+
+from .utils import fundamental
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 
-def fundamental(x, fs):
-    amps = abs(np.fft.rfft(x))
-    freqs = np.fft.rfftfreq(len(x), 1 / fs)
-    f0 = freqs[np.argmax(amps)]
+class WHITED:
+    """WHITED dataset reader"""
+    __f0_decimals__: int = 2  # Number of decimal places for fundamental frequency rounding.
+    # Scaling coefficients for different measurement kits
+    __factors__ = {
+        "MK1": {
+            "volt": 1033.64,
+            "amp": 61.4835
+        },
+        "MK2": {
+            "volt": 861.15,
+            "amp": 60.200
+        },
+        "MK3": {
+            "volt": 988.926,
+            "amp": 60.9562
+        },
+    }
 
-    return f0
+    def __init__(self, dirpath: str | Path):
+        """
+        Initializes the WHITED dataset reader.
 
+        Args:
+            dirpath (str | Path): Directory path containing the FLAC files.
+        """
+        if not os.path.exists(dirpath):
+            raise ValueError(f"Directory {dirpath} does not exist.")
 
-class WHITED(Sequence):
-    MK1 = {"volt": 1033.64, "amp": 61.4835}
-    MK2 = {"volt": 861.15, "amp": 60.200}
-    MK3 = {"volt": 988.926, "amp": 60.9562}
+        self._dirpath = Path(dirpath)
 
-    def __init__(self, dirpath: str, f0_decimals=2):
-        filenames = os.listdir(dirpath)
-        filenames = list(filter(lambda x: x.endswith('.flac'), filenames))
+        # Collect metadata from file names
+        self.metadata = self._parse_metadata()
 
-        self.metadata = []
+        # Extract unique appliance labels
+        self.devices = sorted({
+            self.format_label(app_type)
+            for app_type, _, _, _ in self.metadata
+        })
 
-        for filename in filenames:
-            filepath = os.path.join(dirpath, filename)
-            app_type, model, _, mk_type, _ = filename.split('_')
-            # self.metadata.append({'app_type': app_type, 'model': model, 'mk_type': mk_type, 'filepath': filepath})
-            self.metadata.append((app_type, model, mk_type, filepath))
+    def __len__(self) -> int:
+        """Returns the number of available recordings."""
 
-        self._f0_decimals = f0_decimals
-
-    def __len__(self):
         return len(self.metadata)
 
-    def __getitem__(self, indexer: slice | int):
-        item = False
+    def __getitem__(self, indexer: slice | int | list[int]):
+        """
+        Retrieves dataset items by index, slice, or list of indices.
 
+        Args:
+            indexer (slice | int | list[int]): Index, slice, or list of indices.
+
+        Returns:
+            A tuple (voltage, current, fs, f0, appliance_type) or a list of such tuples.
+        """
         if isinstance(indexer, slice):
             iterator = self.metadata[indexer]
         elif isinstance(indexer, list):
             iterator = [self.metadata[idx] for idx in indexer]
         elif isinstance(indexer, int):
             iterator = [self.metadata[indexer]]
-            item = True
         else:
-            raise ValueError
+            raise ValueError(
+                "Invalid index type. Must be int, slice, or list of int.")
 
-        recordings = []
+        recordings = [
+            self._read_data(app_type, mk_type, filepath)
+            for app_type, _, mk_type, filepath in iterator
+        ]
 
-        for app_type, _, mk_type, filepath in iterator:
-            app_type = self.default_label(app_type)
-            data, fs = sf.read(filepath)
+        return recordings[0] if isinstance(indexer, int) else recordings
 
-            coefs = getattr(self, mk_type)
-
-            v, i = data[:, 0], data[:, 1]
-            v = coefs['volt'] * v
-            i = coefs['amp'] * i
-
-            f0 = round(fundamental(v, fs), self._f0_decimals)
-
-            recordings.append((v, i, fs, f0, app_type))
-
-        if item:
-            return recordings[0]
-
-        return recordings
-
-    def default_label(self, label: str) -> str:
+    def _parse_metadata(self) -> list[tuple[str, str, str, Path]]:
         """
-        Format an appliance's label by default
+        Parses metadata from file names in the dataset directory.
 
-        Arguments:
-            label: str
         Returns:
-            str
+            list of tuples: (appliance_type, model, mk_type, filepath)
         """
-        label = label.lower().replace(' ', '_')
+        metadata = []
 
-        return label
+        for filepath in self._dirpath.glob("*.flac"):
+            # Extract filename without extension
+            parts = filepath.stem.split("_")
 
-    def random(self, random_state=None):
-        rng = np.random.RandomState(random_state)
-        idx = rng.randint(len(self))
+            if len(parts) < 4:
+                logger.warning(f"Skipping invalid file name: {filepath.name}")
+                continue
+
+            app_type, model, _, mk_type = parts[:4]
+            metadata.append((app_type, model, mk_type, filepath))
+
+        return metadata
+
+    def _read_data(self, app_type: str, mk_type: str, filepath: Path):
+        """
+        Reads waveform data from a FLAC file and applies calibration.
+
+        Args:
+            app_type (str): Type of appliance.
+            mk_type (str): Measurement kit type.
+            filepath (Path): Path to the FLAC file.
+
+        Returns:
+            tuple: (voltage, current, fs, f0, appliance_type)
+        """
+        app_type = self.format_label(app_type)
+
+        with audioread.audio_open(filepath) as f:
+            fs = f.samplerate
+            num_channels = f.channels
+            data = np.frombuffer(b''.join(f), dtype=np.int16)
+            data = data.reshape(-1, num_channels).astype(np.float32) / 32768.0
+
+        if mk_type not in self.__factors__:
+            raise ValueError(f"Unknown measurement kit type: {mk_type}")
+
+        coefs = self.__factors__[mk_type]
+
+        v = coefs['volt'] * data[:, 0]
+        i = coefs['amp'] * data[:, 1]
+
+        # Estimate mains frequency
+        f0 = round(fundamental(v, fs), self.__f0_decimals__)
+
+        return v, i, fs, f0, app_type
+
+    def format_label(self, label: str) -> str:
+        """
+        Formats an appliance's label.
+
+        Args:
+            label (str): Original appliance label.
+
+        Returns:
+            str: Standardized appliance label.
+        """
+
+        return label.lower().replace(' ', '_')
+
+    def random(self, random_state: int | None = None):
+        """
+        Returns a random dataset sample.
+
+        Args:
+            random_state (int | None): Random seed for reproducibility.
+
+        Returns:
+            tuple: A single dataset sample.
+        """
+        rng = np.random.default_rng(random_state)
+        idx = rng.integers(len(self))
 
         return self[idx]
-
-    @property
-    def devices(self):
-        return sorted(
-            set([
-                self.default_label(app_type) for app_type, *_ in self.metadata
-            ]))
