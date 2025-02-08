@@ -30,20 +30,26 @@ class Datman:
         return self._data__ is not None
 
 
-import numpy as np
-import torch
-import warnings
+class HighFreqDataset:
+
+    @staticmethod
+    def assert_format(output):
+        pass
 
 
 class HighFreqSample:
 
-    def __init__(self, v, i, devices, fs, f0, locs=None):
+    def __init__(self, v, i, fs, f0, devices=None, locs=None):
         assert isinstance(v, (list, np.ndarray, torch.Tensor))
         assert isinstance(i, (list, np.ndarray, torch.Tensor))
-        assert isinstance(devices, (list, tuple, np.ndarray, torch.Tensor))
         assert isinstance(fs, int)
         assert isinstance(f0, (int, float))
-        assert isinstance(locs, (list, np.ndarray, torch.Tensor))
+
+        if devices is not None:
+            assert isinstance(devices, (list, tuple, np.ndarray, torch.Tensor))
+
+        if locs is not None:
+            assert isinstance(locs, (list, np.ndarray, torch.Tensor))
 
         assert v.dtype == i.dtype
 
@@ -52,6 +58,8 @@ class HighFreqSample:
             v = np.asarray(v)
         if isinstance(i, list):
             i = np.asarray(i)
+        if not isinstance(devices, list):
+            devices = list(devices)
         if isinstance(locs, list):
             locs = np.asarray(locs)
 
@@ -81,6 +89,75 @@ class HighFreqSample:
 
         self.__v_modified__ = None
         self.__i_modified__ = None
+
+    def __superpose__(self, sample):
+        """
+        Superposes another HighFreqSample instance onto the current one.
+
+        Conditions:
+        - `fs` (sampling frequency) must be the same.
+        - `f0` (nominal frequency) must be the same.
+        - `v` and `i` must have compatible shapes.
+
+        Returns:
+        - A new `HighFreqSample` instance with superposed voltage and current signals.
+        """
+        if not isinstance(sample, HighFreqSample):
+            raise TypeError(
+                "Superposition requires another HighFreqSample instance.")
+
+        if self.fs != sample.fs:
+            raise ValueError(
+                f"Cannot superpose: Sampling frequencies (fs) must match ({self.fs} != {sample.fs})."
+            )
+
+        if self.f0 != sample.f0:
+            raise ValueError(
+                f"Cannot superpose: Nominal frequencies (f0) must match ({self.f0} != {sample.f0})."
+            )
+
+        if self.v.shape != sample.v.shape or self.i.shape != sample.i.shape:
+            raise ValueError(
+                "Cannot superpose: Voltage and current signal shapes must be the same."
+            )
+
+        # Perform superposition
+        v = self.v
+        i = self.i + sample.i
+
+        # Merge devices if both instances have devices
+        if self.devices and sample.devices:
+            devices = self.devices + sample.devices
+        elif self.devices:
+            devices = self.devices
+        elif sample.devices:
+            devices = sample.devices
+        else:
+            devices = None
+
+        # Merge locations if both instances have locs
+        if self.locs is not None and sample.locs is not None:
+            locs = np.concatenate((self.locs, sample.locs), axis=0)
+        elif self.locs is not None:
+            locs = self.locs
+        elif sample.locs is not None:
+            locs = sample.locs
+        else:
+            locs = None
+
+        # Return a new instance with the superposed values
+        return HighFreqSample(v,
+                              i,
+                              self.fs,
+                              self.f0,
+                              devices=devices,
+                              locs=locs)
+
+    def __add__(self, sample):
+        return self.__superpose__(sample)
+
+    def __radd__(self, sample):
+        return self.__superpose__(sample)
 
     @property
     def v(self):
@@ -136,6 +213,14 @@ class HighFreqSample:
     def n_components(self):
         return self.i.shape[0]
 
+    @property
+    def n_devices(self):
+        return len(self.devices)
+
+    @property
+    def n_types(self):
+        return len(set(self.devices))
+
     def save(self):
         v = self.__v_modified__ if self.__v_modified__ is not None else self.v
         i = self.__i_modified__ if self.__i_modified__ is not None else self.i
@@ -188,11 +273,4 @@ class HighFreqSample:
             locs = locs.astype(int)
             locs = np.clip(locs, a_min=0, a_max=np.prod(v.shape))
 
-        return self.__class__(v, i, self.devices, fs, self.f0, locs=self.locs)
-
-
-class HighFreqDataset:
-
-    @staticmethod
-    def assert_format(output):
-        pass
+        return HighFreqSample(v, i, self.devices, fs, self.f0, locs=self.locs)
