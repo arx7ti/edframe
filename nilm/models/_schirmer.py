@@ -10,10 +10,10 @@ from sklearn.model_selection import train_test_split
 
 from ...metrics import f1_score, teca_score, modified_f1_score, jaccard_score, modified_jaccard_score
 import torchvision.models as models
-from ..disaggregator import Disaggregator
+from ..base import BaseModel
 
 
-class SchirmerCNN(Disaggregator):
+class SchirmerCNN(BaseModel):
 
     def __init__(
         self,

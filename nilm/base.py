@@ -6,7 +6,7 @@ import torch.optim as optim
 from ..metrics import f1_score, teca_score, modified_f1_score, jaccard_score, modified_jaccard_score
 
 
-class Disaggregator(ABC, nn.Module):
+class BaseModel(ABC, nn.Module):
 
     def __init__(self):
         super().__init__()
