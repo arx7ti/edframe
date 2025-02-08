@@ -32,9 +32,32 @@ class Datman:
 
 class HighFreqDataset:
 
-    @staticmethod
-    def assert_format(output):
+    def is_homogeneous(self):
+        return len(set([x.i.shape for x in self.data])) == 1
+
+    def v(self):
+        return self.data[0].v
+
+    def i(self):
+        if self.is_homogeneous():
+            return np.concatenate([x.i for x in self.data])
+
+        raise AttributeError
+
+    def random(self, random_seed=None):
         pass
+
+    def similarity(self, dataset, metric='cosine'):
+        I1, I2 = self.i, dataset.i
+
+        if metric == 'cosine':
+            I1n = I1 / np.linalg.norm(I1, axis=1, keepdims=True)
+            I2n = I2 / np.linalg.norm(I2, axis=1, keepdims=True)
+            scores = I1n @ I2n.T
+        else:
+            raise ValueError
+
+        return scores
 
 
 class HighFreqSample:
