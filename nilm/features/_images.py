@@ -73,3 +73,31 @@ class VITrajectory(nn.Module):
             x = torch.from_numpy(x)
 
         return x
+
+
+class DistanceMatrix(nn.Module):
+
+    def __init__(self):
+        super().__init__()
+
+    @torch.jit.export
+    def forward(self, signal: torch.Tensor) -> torch.Tensor:
+        """
+        Compute the Euclidean distance similarity matrix for a signal.
+
+        Args:
+            signal (torch.Tensor): Input signal of shape (..., w).
+
+        Returns:
+            torch.Tensor: Distance similarity matrix of shape (..., w, w).
+        """
+        *batch_dims, w = signal.shape
+        distance_matrix = torch.empty(*batch_dims,
+                                      w,
+                                      w,
+                                      dtype=signal.dtype,
+                                      device=signal.device)
+
+        distance_matrix = abs(signal.unsqueeze(-1) - signal.unsqueeze(-2))
+
+        return distance_matrix
