@@ -102,6 +102,11 @@ class HighFreqSample:
         Returns:
         - A new `HighFreqSample` instance with superposed voltage and current signals.
         """
+        if self.is_unsaved():
+            warnings.warn(
+                "Instance has unsaved changes. Use method .save() first to apply changes.",
+                UserWarning)
+
         if not isinstance(sample, HighFreqSample):
             raise TypeError(
                 "Superposition requires another HighFreqSample instance.")
@@ -158,6 +163,12 @@ class HighFreqSample:
 
     def __radd__(self, sample):
         return self.__superpose__(sample)
+
+    def is_unsaved(self):
+        cond = self.__v_modified__ is not None
+        cond |= self.__i_modified__ is not None
+
+        return cond
 
     @property
     def v(self):
