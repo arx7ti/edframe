@@ -18,17 +18,15 @@ from ..base import Datman
 
 class HighFreqDataset(Datman):
 
-    @property
     def fs(self):
         return sorted(set(sample.fs for sample in self.data))
 
-    @property
     def f0(self):
         return sorted(set(sample.f0 for sample in self.data))
 
     @property
     def devices(self):
-        return sorted(set(sample.devices for sample in self.data))
+        return sorted(set(for device in sample.devices for sample in self.data))
 
     @property
     def brands(self):
@@ -167,7 +165,10 @@ class HighFreqDataset(Datman):
         for sample in tqdm(self.data, disable=not progress_bar):
             cycle_size = int(sample.fs / sample.f0)
             fitps = FITPS(cycle_size, int(buff_size * cycle_size), tol)
-            v, i = fitps.transform(sample.v, sample.i)
+            v, i = fitps.transform(sample.v.ravel().tolist(),
+                                   sample.i.ravel().tolist(),
+                                   locs=[])
+            v, i = np.asarray(v), np.asarray(i)
             sample = HighFreqSample(v, i, sample.fs, sample.f0, sample.devices,
                                     sample.locs)
             data.append(sample)

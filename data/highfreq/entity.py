@@ -279,3 +279,20 @@ class HighFreqSample:
             locs = np.clip(locs, a_min=0, a_max=np.prod(v.shape))
 
         return HighFreqSample(v, i, self.devices, fs, self.f0, locs=self.locs)
+
+    def copy(self):
+        """
+        Creates a copy of the instance without copying temporary modifications
+        (i.e., v_modified and i_modified remain None).
+        
+        Returns:
+            HighFreqSample: A new instance with the same data but without modifications.
+        """
+
+        return HighFreqSample(
+            v=self.v.copy(),
+            i=self.i.copy(),
+            fs=self.fs,
+            f0=self.f0,
+            devices=self.devices.copy() if self.devices else None,
+            locs=self.locs.copy() if self.locs is not None else None)
