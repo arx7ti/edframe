@@ -182,10 +182,7 @@ class HighFreqDataset:
 
         return HighFreqDataset(data)
 
-    def drop_low_power(self, thresh=10):
-        pass
-
-    def drop_correlated(self, thresh=0.001, metric='cosine'):
+    def drop_duplicated(self, thresh=0.001, metric='cosine'):
         pass
 
     def drop_rare(self, thresh=0.01):
@@ -195,7 +192,16 @@ class HighFreqDataset:
         pass
 
     def rename(self, naming):
-        pass
+        data = []
+
+        for sample in self.data:
+            sample = sample.copy()
+            sample.devices = [
+                naming.get(device, device) for device in sample.devices
+            ]
+            data.append(sample)
+
+        return HighFreqDataset(data)
 
     def random(self, random_seed=None):
         random.seed(random_seed)
@@ -247,6 +253,9 @@ class HighFreqDataset:
                     filter(lambda sample: sample.active_power > v, data))
 
         return HighFreqDataset(data)
+
+    def ideal_source(self):
+        pass
 
     def count_components(self):
         return [sample.n_components for sample in self.data]
