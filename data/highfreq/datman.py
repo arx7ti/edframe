@@ -9,7 +9,9 @@ import random
 from scipy.signal import resample
 from tqdm import tqdm
 import warnings
-import fitps
+from ...fitps import FITPS 
+
+from .entity import HighFreqSample
 
 
 class HighFreqDataset:
@@ -162,7 +164,7 @@ class HighFreqDataset:
 
         for sample in tqdm(self.data, disable=not progress_bar):
             cycle_size = int(sample.fs / sample.f0)
-            fitps = fitps.FITPS(cycle_size, int(buff_size * cycle_size), tol)
+            fitps = FITPS(cycle_size, int(buff_size * cycle_size), tol)
             v, i = fitps.transform(sample.v, sample.i)
             sample = HighFreqSample(v, i, sample.fs, sample.f0, sample.devices,
                                     sample.locs)
