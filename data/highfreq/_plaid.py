@@ -15,6 +15,7 @@ from .utils import fundamental
 
 class PLAID:
     """PLAID dataset reader."""
+    # __dataset_type__: object = HighFreqDataset
     __f0_decimals__: int = 2  # Number of decimal places for fundamental frequency rounding.
 
     def __init__(

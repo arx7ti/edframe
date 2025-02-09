@@ -35,11 +35,11 @@ class HighFreqSample:
             v = np.asarray(v)
         if isinstance(i, list):
             i = np.asarray(i)
-        if not isinstance(devices, list):
+        if not isinstance(devices, list) and devices is not None:
             devices = list(devices)
-        if isinstance(locs, list):
+        if isinstance(locs, list) and locs is not None:
             locs = np.asarray(locs)
-        if not isinstance(brands, list):
+        if not isinstance(brands, list) and brands is not None:
             brands = list(brands)
 
         if isinstance(v, torch.Tensor):
@@ -58,6 +58,9 @@ class HighFreqSample:
             locs = locs.detach().cpu().numpy()
 
         self._check_vi_data(v, i)
+
+        if (v.ndim == 1 and i.ndim == 1) or (v.ndim == 2 and i.ndim == 2):
+            i = i[None]
 
         self._v = v
         self._i = i

@@ -9,13 +9,14 @@ import random
 from scipy.signal import resample
 from tqdm import tqdm
 import warnings
-from ...fitps import FITPS
+from fitps import FITPS
 
 from sklearn.metrics.pairwise import cosine_similarity
 from .entity import HighFreqSample
+from ..base import Datman
 
 
-class HighFreqDataset:
+class HighFreqDataset(Datman):
 
     @property
     def fs(self):
