@@ -233,6 +233,18 @@ class HighFreqDataset:
                 data = list(
                     filter(lambda sample: v.issubset(set(sample.brands)),
                            data))
+            elif k == 'power__leq':
+                data = list(
+                    filter(lambda sample: sample.active_power <= v, data))
+            elif k == 'power__le':
+                data = list(
+                    filter(lambda sample: sample.active_power < v, data))
+            elif k == 'power__geq':
+                data = list(
+                    filter(lambda sample: sample.active_power >= v, data))
+            elif k == 'power__ge':
+                data = list(
+                    filter(lambda sample: sample.active_power > v, data))
 
         return HighFreqDataset(data)
 
@@ -275,4 +287,5 @@ class HighFreqDataset:
         pass
 
     def _check_if_read(self):
-        pass
+        if self.data is None:
+            raise ValueError
