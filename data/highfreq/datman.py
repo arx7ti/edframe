@@ -205,7 +205,7 @@ class HighFreqDataset:
 
     def random(self, random_seed=None):
         random.seed(random_seed)
-        idx = random.sample(range(len(self)))
+        idx = random.sample(range(len(self)), k=1)
 
         return self.data[idx]
 
@@ -254,8 +254,8 @@ class HighFreqDataset:
 
         return HighFreqDataset(data)
 
-    def ideal_source(self):
-        pass
+    def ideal_source(self, V_rms=220):
+        self._check_if_invariant()
 
     def count_components(self):
         return [sample.n_components for sample in self.data]
@@ -298,3 +298,26 @@ class HighFreqDataset:
     def _check_if_read(self):
         if self.data is None:
             raise ValueError
+
+    def basic_subsets(self):
+        """
+        Groups samples into aligned subsets based on unique (f0, fs) pairs and their characteristics
+        such as aggregated, submetered, or invariant.
+        
+        Returns:
+            list: A list of HighFreqDataset instances, where each dataset contains samples
+                  with the same (f0, fs) and alignment type.
+        """
+        subsets = {}
+
+        for sample in self.data:
+            key = (sample.f0, sample.fs,
+                   'aggregated' if sample.is_aggregated() else
+                   'submetered' if sample.is_submetered() else 'invariant')
+
+            if key not in subsets:
+                subsets[key] = []
+
+            subsets[key].append(sample)
+
+        return [HighFreqDataset(v) for v in subsets.values()]
