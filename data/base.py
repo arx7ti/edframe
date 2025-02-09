@@ -47,6 +47,10 @@ class HighFreqDataset:
     def devices(self):
         return sorted(set(sample.devices for sample in self.data))
 
+    @property
+    def brands(self):
+        pass
+
     def is_homogeneous(self):
         return len(set([x.i.shape for x in self.data])) == 1
 
@@ -196,6 +200,21 @@ class HighFreqDataset:
         data = list(filter(lambda sample: sample.n_components > 1, self.data))
 
         return HighFreqDataset(data)
+
+    def drop_low_power(self, thresh=10):
+        pass
+
+    def drop_correlated(self, thresh=0.001, metric='cosine'):
+        pass
+
+    def drop_rare(self, thresh=0.01):
+        pass
+
+    def train_test(self, test_size=0.3, groupby=None):
+        pass
+
+    def rename(self, naming):
+        pass
 
     def random(self, random_seed=None):
         random.seed(random_seed)
