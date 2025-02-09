@@ -14,5 +14,7 @@ PYBIND11_MODULE(fitps, m)
          .def("add_samples", &FITPS::add_samples, py::arg("volt_sample"), py::arg("amp_sample"),
               "Adds voltage and current samples, returns transformed cycle data")
          .def("clear", &FITPS::clear, "Clears internal buffers")
-         .def("transform", &FITPS::transform, py::arg("volts"), py::arg("amps"), "Transforms the whole voltage and current vectors");
+         .def("transform", &FITPS::transform,
+              py::arg("volts"), py::arg("amps"), py::arg("locs") = std::vector<int>{},
+              "Transforms the whole voltage and current vectors with an optional locs parameter");
 }

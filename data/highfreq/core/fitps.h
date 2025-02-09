@@ -110,10 +110,35 @@ public:
     amp_buffer.shrink_to_fit();
     amp_buffer.reserve(buffer_size);
   }
-  pair<vector<vector<float>>, vector<vector<float>>> transform(const vector<float> &volts, const vector<float> &amps)
+  pair<vector<vector<float>>, vector<vector<float>>> transform(const vector<float> &volts,
+                                                               const vector<float> &amps,
+                                                               vector<int> locs = {})
   {
     vector<vector<float>> all_volt_cycles;
     vector<vector<float>> all_amp_cycles;
+
+    if (!locs.empty() && find(locs.begin(), locs.end(), -1) == locs.end()) // Handling None in locs
+    {
+      // Convert locs to array-like structure
+      vector<int> locs_array = locs;
+
+      // Shift locs by minimum
+      int locs_min = *min_element(locs_array.begin(), locs_array.end());
+      for (auto &loc : locs_array)
+      {
+        loc -= locs_min;
+      }
+
+      // Clip locs
+      int x_shape_prod = volts.size(); // Assuming same size as volts
+      for (auto &loc : locs_array)
+      {
+        loc = max(0, min(loc, x_shape_prod - 1));
+      }
+
+      assert(*min_element(locs_array.begin(), locs_array.end()) >= 0);
+      assert(*max_element(locs_array.begin(), locs_array.end()) < x_shape_prod);
+    }
 
     for (size_t i = 0; i < volts.size(); ++i)
     {
