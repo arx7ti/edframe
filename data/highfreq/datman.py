@@ -57,18 +57,16 @@ class HighFreqDataset(Datman):
         if not all([sample.is_invariant() for sample in self.data]):
             raise ValueError
 
+    def _check_if_homogeneous(self):
+        if not self.is_homogeneous():
+            raise AttributeError
+
     def split_by_cycles(self, n_cycles):
         self._check_if_invariant()
 
         data = []
 
         for sample in self.data:
-            agg_fmt = True
-
-            if isinstance(app, str):
-                app = [app]
-                agg_fmt = False
-
             for j in range(0, sample.n_cycles, n_cycles):
                 vj = sample.v[..., j:j + n_cycles, :]
                 ij = sample.i[..., j:j + n_cycles, :]
@@ -78,7 +76,8 @@ class HighFreqDataset(Datman):
                         _locs = []
                         _devices = []
 
-                        for device, (on, off) in zip(app, sample.locs):
+                        for device, (on, off) in zip(sample.devices,
+                                                     sample.locs):
                             on = max(on - j * n_cycles * sample.i.shape[-1], 0)
                             off = max(
                                 min(
@@ -92,18 +91,13 @@ class HighFreqDataset(Datman):
                             _devices.append(device)
                             _locs.append([on, off])
 
-                        if not agg_fmt:
-                            _devices = _devices[0]
-
                         data.append(
                             HighFreqSample(vj, ij, sample.fs, sample.f0,
                                            _devices, _locs))
                     else:
-                        if not agg_fmt:
-                            app = app[0]
-
                         data.append(
-                            HighFreqSample(vj, ij, sample.fs, sample.f0, app))
+                            HighFreqSample(vj, ij, sample.fs, sample.f0,
+                                           sample.devices))
 
         return HighFreqDataset(data)
 
@@ -189,7 +183,7 @@ class HighFreqDataset(Datman):
     def drop_duplicated(self, thresh=0.001, metric='cosine'):
         self._check_if_homogeneous()
 
-        I = self.i
+        I = self.i()
         I = I.reshape(len(I), -1)
 
         unique = np.ones(len(I), dtype=bool)
@@ -229,7 +223,7 @@ class HighFreqDataset(Datman):
 
     def random(self, random_seed=None):
         random.seed(random_seed)
-        idx = random.sample(range(len(self)), k=1)
+        idx = random.sample(range(len(self)), k=1)[0]
 
         return self.data[idx]
 
@@ -327,6 +321,7 @@ class HighFreqDataset(Datman):
             raise ValueError
 
     def basic_subsets(self):
+        # TODO return by count
         """
         Groups samples into aligned subsets based on unique (f0, fs) pairs and their characteristics
         such as aggregated, submetered, or invariant.

@@ -278,7 +278,13 @@ class HighFreqSample:
             locs = locs.astype(int)
             locs = np.clip(locs, a_min=0, a_max=np.prod(v.shape))
 
-        return HighFreqSample(v, i, self.devices, fs, self.f0, locs=self.locs)
+        return HighFreqSample(v, i, fs, self.f0, self.devices, locs=self.locs)
+
+    def is_submetered(self):
+        return self.n_components == 1
+
+    def is_aggregated(self):
+        return self.n_components > 1
 
     def copy(self):
         """
