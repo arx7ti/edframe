@@ -9,7 +9,7 @@ import random
 from scipy.signal import resample
 from tqdm import tqdm
 import warnings
-from ...fitps import FITPS 
+from ...fitps import FITPS
 
 from .entity import HighFreqSample
 
@@ -215,11 +215,26 @@ class HighFreqDataset:
 
         return scores
 
-    def filter_by_device(self, devices):
-        pass
+    def filter(self, **kwargs):
+        data = self.data
 
-    def filter_by_brand(self, brand):
-        pass
+        for k, v in kwargs.items():
+            if k == 'devices':
+                data = list(filter(lambda sample: sample.devices == v, data))
+            elif k == 'devices__in':
+                v = set(v)
+                data = list(
+                    filter(lambda sample: v.issubset(set(sample.devices)),
+                           data))
+            elif k == 'brands':
+                data = list(filter(lambda sample: sample.brands == v, data))
+            elif k == 'brands__in':
+                v = set(v)
+                data = list(
+                    filter(lambda sample: v.issubset(set(sample.brands)),
+                           data))
+
+        return HighFreqDataset(data)
 
     def count_components(self):
         return [sample.n_components for sample in self.data]
