@@ -26,7 +26,8 @@ class HighFreqDataset(Datman):
 
     @property
     def devices(self):
-        return sorted(set(for device in sample.devices for sample in self.data))
+        return sorted(
+            set(device for sample in self.data for device in sample.devices))
 
     @property
     def brands(self):
@@ -253,8 +254,11 @@ class HighFreqDataset(Datman):
             elif k == 'devices__in':
                 v = set(v)
                 data = list(
-                    filter(lambda sample: v.issubset(set(sample.devices)),
-                           data))
+                    filter(
+                        lambda sample: any(device in v
+                                           for device in sample.devices),
+                        data))
+
             elif k == 'brands':
                 data = list(filter(lambda sample: sample.brands == v, data))
             elif k == 'brands__in':
