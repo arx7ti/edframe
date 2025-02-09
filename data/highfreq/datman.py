@@ -11,6 +11,7 @@ from tqdm import tqdm
 import warnings
 from ...fitps import FITPS
 
+from sklearn.metrics.pairwise import cosine_similarity
 from .entity import HighFreqSample
 
 
@@ -183,7 +184,27 @@ class HighFreqDataset:
         return HighFreqDataset(data)
 
     def drop_duplicated(self, thresh=0.001, metric='cosine'):
-        pass
+        self._check_if_homogeneous()
+
+        I = self.i
+        I = I.reshape(len(I), -1)
+
+        unique = np.ones(len(I), dtype=bool)
+
+        if metric == 'cosine':
+            D = 1 - cosine_similarity(I)
+        else:
+            raise ValueError
+
+        for i in range(len(I)):
+            if unique[i]:
+                duplicate_indices = np.where(D[i] < thresh)[0]
+                unique[duplicate_indices] = False
+                unique[i] = True
+
+        data = [s for s, u in zip(self.data, unique) if u]
+
+        return HighFreqDataset(data)
 
     def drop_rare(self, thresh=0.01):
         pass
