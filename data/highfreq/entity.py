@@ -13,7 +13,7 @@ import warnings
 
 class HighFreqSample:
 
-    def __init__(self, v, i, fs, f0, devices=None, locs=None):
+    def __init__(self, v, i, fs, f0, devices=None, locs=None, brands=None):
         assert isinstance(v, (list, np.ndarray, torch.Tensor))
         assert isinstance(i, (list, np.ndarray, torch.Tensor))
         assert isinstance(fs, int)
@@ -24,6 +24,9 @@ class HighFreqSample:
 
         if locs is not None:
             assert isinstance(locs, (list, np.ndarray, torch.Tensor))
+
+        if brands is not None:
+            assert isinstance(brands, (list, tuple, np.ndarray, torch.Tensor))
 
         assert v.dtype == i.dtype
 
@@ -36,6 +39,8 @@ class HighFreqSample:
             devices = list(devices)
         if isinstance(locs, list):
             locs = np.asarray(locs)
+        if not isinstance(brands, list):
+            brands = list(brands)
 
         if isinstance(v, torch.Tensor):
             warnings.warn("Input 'v' was a PyTorch tensor, cast to NumPy.",
@@ -60,6 +65,7 @@ class HighFreqSample:
         self.fs = fs
         self.f0 = f0
         self.locs = locs
+        self.brands = brands
 
         self.__v_modified__ = None
         self.__i_modified__ = None
@@ -124,13 +130,24 @@ class HighFreqSample:
         else:
             locs = None
 
+        # Merge brands if both instances have brands
+        if self.brands and sample.brands:
+            brands = self.brands + sample.brands
+        elif self.brands:
+            brands = self.brands
+        elif sample.brands:
+            brands = sample.brands
+        else:
+            brands = None
+
         # Return a new instance with the superposed values
         return HighFreqSample(v,
                               i,
                               self.fs,
                               self.f0,
                               devices=devices,
-                              locs=locs)
+                              locs=locs,
+                              brands=brands)
 
     def __add__(self, sample):
         return self.__superpose__(sample)
