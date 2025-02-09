@@ -240,7 +240,27 @@ class HighFreqDataset:
         return [sample.n_components for sample in self.data]
 
     def groupby(self, method='devices'):
-        pass
+        data = dict()
+
+        for id, sample in enumerate(self.data):
+            if method in ['devices', 'devices__id']:
+                key = sample.devices
+            elif method in ['brands', 'brands__id']:
+                key = sample.brands
+            else:
+                raise ValueError
+
+            key = tuple(sorted(key))
+
+            if key not in data:
+                data[key] = []
+
+            if 'id' in method:
+                data[key].append(id)
+            else:
+                data[key].append(sample)
+
+        return data
 
     def transients(self, thresh=1e-4):
         pass
