@@ -268,16 +268,16 @@ class HighFreqDataset(Datman):
                            data))
             elif k == 'power__leq':
                 data = list(
-                    filter(lambda sample: sample.active_power <= v, data))
+                    filter(lambda sample: sample.active_power() <= v, data))
             elif k == 'power__le':
                 data = list(
-                    filter(lambda sample: sample.active_power < v, data))
+                    filter(lambda sample: sample.active_power() < v, data))
             elif k == 'power__geq':
                 data = list(
-                    filter(lambda sample: sample.active_power >= v, data))
+                    filter(lambda sample: sample.active_power() >= v, data))
             elif k == 'power__ge':
                 data = list(
-                    filter(lambda sample: sample.active_power > v, data))
+                    filter(lambda sample: sample.active_power() > v, data))
 
         return HighFreqDataset(data)
 
