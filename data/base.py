@@ -234,6 +234,33 @@ class HighFreqDataset:
 
         return scores
 
+    def filter_by_device(self, devices):
+        pass
+
+    def filter_by_brand(self, brand):
+        pass
+
+    def count_components(self):
+        return [sample.n_components for sample in self.data]
+
+    def groupby(self, method='devices'):
+        pass
+
+    def transients(self, thresh=1e-4):
+        pass
+
+    def steady_states(self, thresh=1e-4):
+        pass
+
+    def union(self, dataset):
+        pass
+
+    def __getitem__(self, idx):
+        pass
+
+    def _check_if_read(self):
+        pass
+
 
 class HighFreqSample:
 
