@@ -302,3 +302,82 @@ class HighFreqSample:
             f0=self.f0,
             devices=self.devices.copy() if self.devices else None,
             locs=self.locs.copy() if self.locs is not None else None)
+
+    def is_transient(self, thresh=0.1):
+        if self.locs is not None:
+            if self.locs.min() > 0:
+                return True
+
+        _E0 = 1e-9
+
+        u, l = self.i.sum(0).max(1), self.i.sum(0).min(1)
+        u = u / (u.max() + _E0)
+        l = l / (l.min() + _E0)
+        scores = [abs(u.max() - u.min())]
+        scores += [abs(l.max() - l.min())]
+        scores += [abs(u.max() - l.min())]
+        scores += [abs(l.max() - u.min())]
+        score = max(scores)
+        is_transient = score > thresh
+
+        return is_transient
+
+    def compute_locs(self, I_on=0.05, I_min=0.1):
+        # TODO to check
+        if not self.is_invariant():
+            raise AttributeError
+
+        i = self.i.sum(0)
+        I = abs(i).max(1)
+
+        s = (I > I_min).astype(int)
+        ds = np.diff(s, prepend=s[0])
+        on = (ds > 0).nonzero()[0]
+        off = (ds < 0).nonzero()[0]
+
+        if on.size == 0:
+            return None
+
+        if off.size == 0:
+            off = np.append(off, len(s))
+
+        if off[0] < on[0]:
+            on = np.insert(on, 0, 0)
+
+        if off[-1] < on[-1]:
+            off = np.append(off, len(s))
+
+        assert len(on) == len(off)
+
+        locs = np.stack((on, off)).T
+
+        assert (locs[:, 1] > locs[:, 0]).all()
+
+        for k, (a, b) in enumerate(locs):
+            ia = i[a]
+            on = (abs(np.diff(ia)) > I_on).nonzero()[0]
+
+            if on.size > 0:
+                on = on[0]
+            else:
+                on = 0
+
+            if on > 0 and abs(ia[:on]).mean() > I_min:
+                on = 0
+
+            ib = i[b - 1]
+            off = (abs(np.diff(ib[::-1])) > I_on).nonzero()[0]
+
+            if off.size > 0:
+                off = off[0]
+            else:
+                off = 0
+
+            if off > 0 and abs(ib[:off]).mean() > I_min:
+                off = 0
+
+            off = len(i[a:b].ravel()) - off - 1
+
+            locs[k] = [a * i.shape[1] + on, a * i.shape[1] + off]
+
+        return locs
